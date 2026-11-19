@@ -1,0 +1,16 @@
+normalizer:
+  join_suffixes: false
+
+models:
+  tfidf_baseline:
+    display_name: "TF-IDF + Logistic Regression"
+    type: sklearn_tfidf
+    enabled: true
+    vectorizer: baseline_tfidf/vectorizer_tfidf12.joblib
+    heads:
+      recommendation:
+        file: baseline_tfidf/tfidf12_rec_B.joblib
+        labels: {0: recommended, 1: not_recommended, 2: no_idea}
+      rating_band:
+        file: baseline_tfidf/tfidf12_band_B.joblib
+        labels: {0: low, 1: medium, 2: high}
