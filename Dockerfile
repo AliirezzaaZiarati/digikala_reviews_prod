@@ -2,9 +2,12 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install dependencies first so this layer is cached between code changes
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+
+# Install offline from the local wheels folder (mounted only during this step,
+# so the 3 GB of wheels do not end up inside the image layer)
+RUN --mount=type=bind,source=wheels,target=/wheels \
+    pip install --no-cache-dir --no-index --find-links=/wheels -r requirements.txt
 
 # Copy only the code and config; model files are mounted at runtime
 COPY app ./app

@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en" data-lite="0">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>From Notebook to Service · Production Atlas</title>
+<style>
+/* ================= 1. DESIGN TOKENS ================= */
+:root{
+  --scale:1;
+  --f-display:"Fraunces","Instrument Serif","Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+  --f-body:"Inter","Segoe UI","Helvetica Neue",Arial,system-ui,sans-serif;
+  --f-mono:"JetBrains Mono","IBM Plex Mono","DejaVu Sans Mono",Consolas,monospace;
+  color-scheme:light;
+  --bg-0:#E3EAEC; --bg-1:#D2DEE3;
+  --ink:#16293A; --ink-soft:#44596B; --ink-faint:#7C909F;
+  --glass:rgba(255,255,255,.40); --glass-edge:rgba(22,41,58,.13); --glass-solid:#EDF2F4;
+  --runtime:#1A8A80; --runtime-ink:#0F6B63; --files:#B7832F; --build:#3F9266;
+  --config:#4379C2; --err:#CB6B40; --import:#71879A;
+  --blob-a:rgba(26,138,128,.18); --blob-b:rgba(67,121,194,.15); --blob-c:rgba(183,131,47,.16);
+  --shadow:0 18px 44px rgba(40,70,90,.14);
+}
+
+/* ================= 2. BASE ================= */
+*{box-sizing:border-box;margin:0}
+html{font-size:calc(18px * var(--scale));scroll-behavior:smooth}
+body{
+  min-height:100vh;color:var(--ink);font:400 1rem/1.6 var(--f-body);-webkit-font-smoothing:antialiased;
+  background:
+    radial-gradient(60rem 40rem at 12% -10%,var(--blob-a),transparent 60%),
+    radial-gradient(50rem 40rem at 96% 8%,var(--blob-b),transparent 60%),
+    radial-gradient(46rem 36rem at 60% 112%,var(--blob-c),transparent 60%),
+    linear-gradient(160deg,var(--bg-0),var(--bg-1));
+  background-attachment:fixed;
+}
+body::before{ /* faint dot grid */
+  content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.35;
+  background-image:radial-gradient(var(--ink-faint) 1px,transparent 1px);background-size:34px 34px;
+  mask-image:linear-gradient(180deg,#000,transparent 70%);-webkit-mask-image:linear-gradient(180deg,#000,transparent 70%);
+}
+.wrap{width:min(1400px,calc(100% - 2.5rem));margin-inline:auto}
+:focus-visible{outline:2px solid var(--runtime);outline-offset:3px;border-radius:6px}
+
+/* ================= 3. COMPONENTS ================= */
+.glass{
+  background:var(--glass);border:1px solid var(--glass-edge);border-radius:24px;box-shadow:var(--shadow);
+  -webkit-backdrop-filter:blur(18px) saturate(140%);backdrop-filter:blur(18px) saturate(140%);
+}
+:root[data-lite="1"] .glass{background:var(--glass-solid);-webkit-backdrop-filter:none;backdrop-filter:none}
+
+.btn{
+  font:600 .85rem var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--ink);cursor:pointer;
+  padding:.55rem .95rem;border-radius:999px;border:1px solid var(--glass-edge);background:transparent;transition:.18s;
+}
+.btn:hover,.btn[aria-pressed="true"]{background:color-mix(in srgb,var(--runtime) 18%,transparent);border-color:var(--runtime)}
+.btn.primary{border-color:var(--runtime);background:color-mix(in srgb,var(--runtime) 22%,transparent)}
+
+.badge{display:inline-flex;align-items:center;gap:.45rem;font:700 .8rem var(--f-mono);letter-spacing:.1em;text-transform:uppercase;
+  padding:.3rem .7rem;border-radius:999px;border:1px solid currentColor}
+.badge::before{content:"";width:.5rem;height:.5rem;border-radius:50%;background:currentColor}
+.badge.done{color:color-mix(in srgb,var(--build) 70%,var(--ink))}
+.badge.next{color:color-mix(in srgb,var(--files) 70%,var(--ink))}
+
+.tabs{display:flex;flex-wrap:wrap;gap:.4rem}
+.tab{font:600 .85rem var(--f-mono);letter-spacing:.04em;color:var(--ink-soft);cursor:pointer;padding:.5rem .8rem;
+  border-radius:12px;border:1px solid transparent;background:transparent}
+.tab:hover{color:var(--ink)}
+.tab[aria-selected="true"]{color:var(--ink);border-color:var(--glass-edge);background:var(--glass)}
+
+.term{position:relative;border-bottom:1.5px dashed var(--ink-faint);cursor:help}
+.term::after{
+  content:attr(data-tip);position:absolute;left:50%;bottom:calc(100% + .6rem);transform:translateX(-50%) translateY(4px);
+  width:max-content;max-width:18rem;padding:.6rem .8rem;border-radius:12px;background:var(--glass-solid);
+  border:1px solid var(--glass-edge);box-shadow:var(--shadow);font:400 .9rem/1.4 var(--f-body);color:var(--ink);
+  opacity:0;pointer-events:none;transition:.18s;z-index:30;
+}
+.term:hover::after,.term:focus-visible::after{opacity:1;transform:translateX(-50%)}
+
+/* wires: one class per connection type */
+.wire{fill:none;stroke-linecap:round}
+.wire.base{stroke-width:2;opacity:.45}
+.wire.runtime{stroke:var(--runtime)}
+.wire.packets{stroke-width:6;stroke-dasharray:.1 22;--loop:-22.1;animation:flow 1.2s linear infinite}
+.wire.files{stroke:var(--files);stroke-width:2.5;stroke-dasharray:8 8;--loop:-16;animation:flow 1.6s linear infinite}
+.wire.config{stroke:var(--config);stroke-width:1.5}
+.wire.import{stroke:var(--import);stroke-width:2;stroke-dasharray:2 7}
+.wire.build{stroke:var(--build);stroke-width:3;stroke-dasharray:1 8;--loop:-9;animation:flow 2.4s linear infinite}
+@keyframes flow{to{stroke-dashoffset:var(--loop,-16)}}
+
+/* ================= 4. LAYOUT ================= */
+.topbar{
+  position:sticky;top:.75rem;z-index:20;margin:.75rem auto 0;width:min(1400px,calc(100% - 2rem));
+  padding:.7rem 1rem;display:flex;flex-wrap:wrap;align-items:center;gap:.8rem 1.2rem;border-radius:28px;
+}
+.brand{font:600 .85rem var(--f-mono);letter-spacing:.16em;text-transform:uppercase}
+.brand b{color:var(--runtime)}
+#crumb{flex:1;min-width:10rem;color:var(--ink-soft);font-size:.95rem}
+.group{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center}
+
+.hero{display:grid;grid-template-columns:repeat(12,1fr);gap:2rem;padding:clamp(2.5rem,7vw,6rem) 0 2.5rem;align-items:end}
+.hero-main{grid-column:1/9}
+.hero-side{grid-column:9/13;padding:1.7rem}
+.kicker{font:600 .85rem var(--f-mono);letter-spacing:.18em;text-transform:uppercase;color:var(--runtime-ink)}
+.hero h1{font:400 clamp(3rem,8.5vw,7.5rem)/.95 var(--f-display);letter-spacing:-.02em;margin:1rem 0 1.5rem}
+.hero h1 em{font-style:italic;color:var(--runtime)}
+.deck{max-width:38rem;font-size:1.2rem;color:var(--ink-soft)}
+.pull{font:italic 400 1.5rem/1.3 var(--f-display)}
+.pull small{display:block;margin-top:1rem;font:600 .8rem var(--f-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint)}
+
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(14rem,1fr));gap:1rem;margin-bottom:3rem}
+.stat{padding:1.3rem 1.5rem}
+.stat b{display:block;font:400 3rem/1 var(--f-display);color:var(--runtime)}
+.stat span{color:var(--ink-soft)}
+
+.sec-head{display:flex;align-items:baseline;gap:1.2rem;margin:3rem 0 1.2rem;border-top:1px solid var(--glass-edge);padding-top:1rem}
+.numeral{font:400 clamp(4rem,10vw,8rem)/.9 var(--f-display);color:transparent;-webkit-text-stroke:1.5px var(--ink-faint)}
+.sec-head h2{font:400 clamp(1.8rem,3.4vw,2.8rem)/1.1 var(--f-display)}
+
+.grid-3{display:grid;grid-template-columns:repeat(auto-fit,minmax(18rem,1fr));gap:1rem}
+.card{padding:1.4rem 1.5rem}
+.card h3{font:600 .85rem var(--f-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:.9rem}
+.swatches{display:grid;grid-template-columns:repeat(3,1fr);gap:.7rem}
+.sw i{display:block;height:3.4rem;border-radius:14px;border:1px solid var(--glass-edge)}
+.sw span{display:block;margin-top:.3rem;font:600 .8rem var(--f-mono);color:var(--ink-soft)}
+.legend{display:grid;gap:.7rem}
+.legend div{display:flex;align-items:center;gap:1rem}
+.legend svg{flex:none;width:7.5rem;height:1rem}
+.legend span{color:var(--ink-soft)}
+
+#stage{min-height:24rem;margin:1rem 0 3rem}
+.stage-placeholder{padding:3rem;text-align:center;color:var(--ink-soft)}
+
+/* detail drawer (filled by Part 3) */
+#drawer{
+  position:fixed;top:.75rem;right:.75rem;bottom:.75rem;width:min(34rem,calc(100% - 1.5rem));z-index:40;
+  padding:1.6rem;overflow:auto;transform:translateX(110%);transition:transform .35s cubic-bezier(.2,.8,.2,1);
+}
+#drawer.open{transform:none}
+#drawer h2{font:400 2rem/1.1 var(--f-display);margin:.4rem 0 1rem}
+#drawerClose{position:absolute;top:1rem;right:1rem}
+#drawerBody{margin-top:1rem}
+
+#toast{
+  position:fixed;left:50%;bottom:1.5rem;transform:translate(-50%,2rem);opacity:0;pointer-events:none;z-index:60;
+  padding:.8rem 1.2rem;border-radius:999px;transition:.25s;background:var(--glass-solid);border:1px solid var(--glass-edge);box-shadow:var(--shadow)
+}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+
+@media (max-width:900px){.hero-main,.hero-side{grid-column:1/-1}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+
+<header class="topbar glass">
+  <div class="brand"><b>◆</b> Production Atlas</div>
+  <nav id="crumb" aria-label="Breadcrumb">Atlas</nav>
+  <div class="group" role="group" aria-label="Wire layers">
+    <button class="btn" data-layer="all" aria-pressed="true">All</button>
+    <button class="btn" data-layer="runtime" aria-pressed="false">Runtime</button>
+    <button class="btn" data-layer="code" aria-pressed="false">Code</button>
+    <button class="btn" data-layer="build" aria-pressed="false">Build</button>
+    <button class="btn" data-layer="files" aria-pressed="false">Files</button>
+  </div>
+  <div class="group">
+    <button class="btn primary" id="btnStory">▶ Story</button>
+    <button class="btn" id="btnSmaller" title="Smaller text">A−</button>
+    <button class="btn" id="btnLarger" title="Larger text">A+</button>
+    <button class="btn" id="btnLite" aria-pressed="false" title="Disable blur effects">Lite</button>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section class="hero">
+    <div class="hero-main">
+      <div class="kicker">Production phase · Digikala review classifier</div>
+      <h1>From notebook<br>to <em>service</em></h1>
+      <p class="deck">How a trained model leaves the notebook and becomes something anyone can use: an API that serves it, a web page that talks to it, and a container that runs both anywhere.</p>
+    </div>
+    <aside class="hero-side glass">
+      <p class="pull">“The model never changes. Everything around it exists so that it can be used safely.”</p>
+      <small>Guiding idea of this phase</small>
+    </aside>
+  </section>
+
+  <section class="stats" aria-label="Key numbers">
+    <div class="stat glass"><b>2</b><span>prediction heads: recommendation and rating band</span></div>
+    <div class="stat glass"><b>1</b><span>shared contract that every model obeys</span></div>
+    <div class="stat glass"><b>2</b><span>containers on one private network</span></div>
+  </section>
+
+  <!-- ===== PART 3 : ATLAS STAGE (levels 0 and 1). Replace the placeholder below. ===== -->
+  <section id="stage" data-layer="all" aria-label="Atlas">
+    <div class="stage-placeholder glass">The interactive atlas appears here after Part 3.</div>
+  </section>
+
+  <!-- ===== DESIGN SYSTEM PREVIEW: delete this whole <section> in Part 3 ===== -->
+  <section id="dsPreview">
+    <div class="sec-head"><span class="numeral">00</span><h2>Design system preview</h2></div>
+    <div class="grid-3">
+      <div class="card glass">
+        <h3>Palette</h3>
+        <div class="swatches">
+          <div class="sw"><i style="background:var(--runtime)"></i><span>runtime</span></div>
+          <div class="sw"><i style="background:var(--files)"></i><span>files</span></div>
+          <div class="sw"><i style="background:var(--build)"></i><span>build</span></div>
+          <div class="sw"><i style="background:var(--config)"></i><span>config</span></div>
+          <div class="sw"><i style="background:var(--err)"></i><span>error</span></div>
+          <div class="sw"><i style="background:var(--import)"></i><span>import</span></div>
+        </div>
+      </div>
+      <div class="card glass">
+        <h3>Typography</h3>
+        <p style="font:400 2.4rem/1.05 var(--f-display)">Display serif</p>
+        <p style="margin:.6rem 0">Body text stays at 18 px or larger, so it is readable from the back of a classroom.</p>
+        <p style="font:500 .95rem var(--f-mono);color:var(--ink-soft)">POST /predict → {"model_id": "tfidf_baseline"}</p>
+      </div>
+      <div class="card glass">
+        <h3>Components</h3>
+        <p style="margin-bottom:.8rem"><span class="badge done">Done</span> <span class="badge next">Next</span></p>
+        <div class="tabs" role="tablist" style="margin-bottom:.9rem">
+          <button class="tab" role="tab" aria-selected="true">Plain</button>
+          <button class="tab" role="tab" aria-selected="false">Real code</button>
+        </div>
+        <p>Hover this <span class="term" tabindex="0" data-tip="A volume shares a folder from your computer with the container, without copying it.">volume</span> to see a glossary tip.</p>
+      </div>
+    </div>
+    <div class="card glass" style="margin-top:1rem">
+      <h3>Wire types</h3>
+      <div class="legend">
+        <div><svg viewBox="0 0 120 16"><path class="wire runtime base" d="M4 8H116"/><path class="wire runtime packets" d="M4 8H116"/></svg><span><b>Runtime:</b> requests and answers moving while the service runs</span></div>
+        <div><svg viewBox="0 0 120 16"><path class="wire files" d="M4 8H116"/></svg><span><b>Files:</b> model and tokenizer files read from a mounted folder</span></div>
+        <div><svg viewBox="0 0 120 16"><path class="wire config" d="M4 8H116"/></svg><span><b>Config:</b> settings read once at startup, such as models.yaml</span></div>
+        <div><svg viewBox="0 0 120 16"><path class="wire import" d="M4 8H116"/></svg><span><b>Import:</b> one Python file using another</span></div>
+        <div><svg viewBox="0 0 120 16"><path class="wire build" d="M4 8H116"/></svg><span><b>Build:</b> steps that run once while the image is built</span></div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<aside id="drawer" class="glass" aria-hidden="true" aria-labelledby="drawerTitle">
+  <button class="btn" id="drawerClose" aria-label="Close details">Close</button>
+  <div class="kicker" id="drawerKicker">Details</div>
+  <h2 id="drawerTitle">Component</h2>
+  <div class="tabs" role="tablist" id="drawerTabs">
+    <button class="tab" role="tab" aria-selected="true" data-tab="plain">Plain</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="analogy">Analogy</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="code">Real code</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="io">In / Out</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="breaks">Breaks when</button>
+  </div>
+  <div id="drawerBody"></div>
+</aside>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+/* ================= BASE ENGINE (Part 1) ================= */
+(() => {
+  const $  = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const root = document.documentElement;
+  const store = {
+    get(k, d){ try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } },
+    set(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
+  };
+
+  // Shared object: later parts attach their data and hooks here
+  const ATLAS = window.ATLAS = { $, $$, store, data: {}, hooks: {}, state: { level: 0, chapter: null, layer: 'all' } };
+
+  // Small message at the bottom of the screen
+  let toastTimer;
+  ATLAS.toast = (msg) => {
+    const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+  };
+
+  // Text size
+  const SCALES = [0.9, 1, 1.12, 1.25, 1.4];
+  let si = SCALES.indexOf(Number(store.get('atlas.scale', '1'))); if (si < 0) si = 1;
+  const applyScale = () => { root.style.setProperty('--scale', SCALES[si]); store.set('atlas.scale', SCALES[si]); };
+  $('#btnSmaller').addEventListener('click', () => { si = Math.max(0, si - 1); applyScale(); });
+  $('#btnLarger').addEventListener('click',  () => { si = Math.min(SCALES.length - 1, si + 1); applyScale(); });
+  applyScale();
+
+  // Lite mode: turns off blur effects for weak projectors and laptops
+  const liteBtn = $('#btnLite');
+  const setLite = (on) => { root.dataset.lite = on ? '1' : '0'; liteBtn.setAttribute('aria-pressed', String(on)); store.set('atlas.lite', on ? '1' : '0'); };
+  liteBtn.addEventListener('click', () => setLite(root.dataset.lite !== '1'));
+  setLite(store.get('atlas.lite', '0') === '1');
+
+  // Wire layers: Part 3 reads ATLAS.state.layer and the data-layer attribute
+  $$('[data-layer]', $('.topbar')).forEach(btn => btn.addEventListener('click', () => {
+    ATLAS.state.layer = btn.dataset.layer;
+    $('#stage').dataset.layer = btn.dataset.layer;
+    $$('[data-layer]', $('.topbar')).forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
+    if (ATLAS.hooks.onLayer) ATLAS.hooks.onLayer(btn.dataset.layer);
+  }));
+
+  // Story button: Part 4 sets ATLAS.hooks.onStory
+  $('#btnStory').addEventListener('click', () => {
+    if (ATLAS.hooks.onStory) ATLAS.hooks.onStory(); else ATLAS.toast('Story mode is added in Part 4.');
+  });
+
+  // Drawer open/close helpers: Part 3 fills the content
+  ATLAS.openDrawer = () => { const d = $('#drawer'); d.classList.add('open'); d.setAttribute('aria-hidden', 'false'); };
+  ATLAS.closeDrawer = () => { const d = $('#drawer'); d.classList.remove('open'); d.setAttribute('aria-hidden', 'true'); };
+  $('#drawerClose').addEventListener('click', ATLAS.closeDrawer);
+
+  // Demo only: tab highlight in the preview card (removed with the preview section)
+  $$('#dsPreview .tab').forEach(t => t.addEventListener('click', () => {
+    $$('#dsPreview .tab').forEach(x => x.setAttribute('aria-selected', String(x === t)));
+  }));
+})();
+
+// ===== PART 2 : GRAPH DATA (chapters, nodes, wires, scenes) goes here =====
+// ===== PART 3 : ENGINE (atlas rendering, wires, zoom, drawer content) goes here =====
+// ===== PART 4 : STORY MODE + PRESENTER MODE + REQUEST JOURNEY goes here =====
+// ===== PART 5 : EXTRAS (error lab, YAML simulator, Dockerfile layers, memory meter, glossary) goes here =====
+</script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+services:
+  api:
+    build: .
+    image: digikala-review-api
+    ports:
+      - "8000:8000"
+    volumes:
+      # Trained artifacts live in the training project; mounted read-only.
+      - ../digikala-review-transformer/artifacts:/models:ro
+    # GPU: uncomment when the encoders arrive
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    restart: unless-stopped
+
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    image: digikala-review-ui
+    ports:
+      - "8501:8501"
+    environment:
+      API_URL: http://api:8000
+    depends_on:
+      - api
+    restart: unless-stopped

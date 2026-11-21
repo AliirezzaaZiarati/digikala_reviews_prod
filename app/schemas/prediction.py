@@ -1,11 +1,11 @@
 from pydantic import BaseModel, Field
 
-MAX_TEXT_LENGTH = 5000  # سقف طول متن؛ در README مستند می‌کنیم
+MAX_TEXT_LENGTH = 5000 
 
 
 class PredictRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=MAX_TEXT_LENGTH)
-    model_id: str = Field(..., description="شناسه‌ی مدل، مثل tfidf_baseline")
+    model_id: str = Field(..., description="Model ID like tfidf_baseline")
 
 
 class HeadResult(BaseModel):

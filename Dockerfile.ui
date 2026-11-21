@@ -1,0 +1,12 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# The UI only needs these two packages, so this image stays small.
+# Installed from PyPI; if the network is unstable, retry the build (layers are cached).
+RUN pip install --no-cache-dir --retries 10 --timeout 60 streamlit requests
+
+COPY ui ./ui
+
+EXPOSE 8501
+CMD ["streamlit", "run", "ui/app.py", "--server.port=8501", "--server.address=0.0.0.0"]

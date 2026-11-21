@@ -18,7 +18,7 @@ async def lifespan(app: FastAPI):
     registry = ModelRegistry()
     registry.load_all()
     app.state.registry = registry
-    yield  # سرویس اینجا در حال کار است
+    yield  
 
 
 app = FastAPI(title="Digikala Review API", lifespan=lifespan)
