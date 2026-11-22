@@ -467,6 +467,593 @@ body::before{ /* faint dot grid */
     ph.textContent = 'Data loaded: ' + D.chapters.length + ' chapters, ' + D.nodes.length + ' nodes, ' + D.wires.length + ' wires. The atlas itself appears after Part 3.';
   }
 })();
+
+// ===== PART 2b : DETAIL TEXT, chapters 01-03 =====
+(() => {
+  const R = String.raw;   // keeps backslashes exactly as written
+  Object.assign(ATLAS.data.detail, {
+
+    training_repo: {
+      plain: `The project where everything was trained. It holds the notebooks, the scripts and an artifacts/ folder with every saved model. The service never imports code from it: it only reads files from artifacts/.`,
+      analogy: `The test kitchen. Recipes are invented and tuned here, and the restaurant only receives the finished dishes.`,
+      code: `digikala-review-transformer/
+├── notebooks/
+├── src/normalize.py
+└── artifacts/
+    ├── baseline_tfidf/      vectorizer + 4 classifiers + config.json
+    └── transformer_runs/    one folder per fine-tuned encoder`,
+      breaks: [
+        `The service must never import code from this repo: inside Docker that folder does not exist.`,
+        `Moving or renaming artifacts/ breaks the volume path in docker-compose.yml.`
+      ]
+    },
+
+    vectorizer: {
+      plain: `Turns a review into one long row of 500,000 numbers. Each number says how telling one word or word pair is in this review. Both prediction heads read the same row, so it is fitted once and shared.`,
+      analogy: `A translator who turns a sentence into a score sheet with 500,000 boxes: one box per word or word pair, filled in by how telling that phrase is.`,
+      code: R`# settings recorded in config.json
+TfidfVectorizer(
+    ngram_range=(1, 2),            # single words and word pairs
+    min_df=5,                      # ignore phrases seen in fewer than 5 reviews
+    max_features=500000,
+    sublinear_tf=True,
+    token_pattern=r"[\w\u200c]+",  # keeps the Persian half-space
+)`,
+      breaks: [
+        `It was fitted on the training split only. A vectorizer fitted on other text would give columns the heads do not expect.`,
+        `The heads expect exactly 500,000 columns. Any other width raises an error.`,
+        `It only understands text cleaned like in training, which is why the normalizer must match.`
+      ]
+    },
+
+    lr_rec: {
+      plain: `A logistic-regression classifier. It reads the 500,000 numbers and returns three probabilities: recommended, not recommended or no idea. This is variant B, trained and evaluated on the corrected labels, with class weights because the classes are imbalanced.`,
+      analogy: `A judge who has read 2.4 million reviews and gives the verdict as three percentages instead of one yes or no.`,
+      code: `# from config.json
+model_id: tfidf12_rec_B     C: 0.3     class_weight: balanced
+solver: lbfgs               iterations used: 262     converged: True
+training rows: 2,392,157
+classes: 0 = recommended, 1 = not_recommended, 2 = no_idea
+
+# at serving time
+probs = clf.predict_proba(X)[0]`,
+      breaks: [
+        `Probabilities are the model’s belief, not a guarantee. A mixed review can give 0.45 and 0.50.`,
+        `The column order comes from clf.classes_. Assuming it by hand could swap two labels silently.`
+      ]
+    },
+
+    lr_band: {
+      plain: `The second head. It reads the same row of numbers and returns three probabilities for the rating band: low, medium or high. The band was derived from the numeric rating during training, and the rating itself is never an input.`,
+      analogy: `A second judge who sits next to the first one and looks at the same score sheet, but answers a different question.`,
+      code: `# from config.json
+model_id: tfidf12_band_B    C: 0.1     class_weight: balanced
+solver: lbfgs               iterations used: 241     converged: True
+training rows: 2,860,236
+classes: 0 = low, 1 = medium, 2 = high`,
+      breaks: [
+        `The two heads were trained on different row counts. They can disagree, and that is normal.`,
+        `Adjacent bands are easy to confuse, so a medium answer with 0.38 is not a confident one.`
+      ]
+    },
+
+    enc_folder: {
+      plain: `Everything one fine-tuned encoder left behind. For serving, only a few files matter: the weights (.pt), the tokenizer folder and the encoder config. The rest are training reports.`,
+      analogy: `A chef’s go-bag: the recipe book (weights) and the dictionary (tokenizer). The diaries of every practice session stay at home.`,
+      code: `artifacts/transformer_runs/roberta_B/
+├── roberta_B_best_model.pt     weights of the best checkpoint
+├── tokenizer/                  vocabulary and settings
+├── encoder_config.json         encoder settings
+├── config_resolved.yaml        full training settings
+├── run_summary.json
+├── history.csv · train_log.csv · train.log
+└── test_probs.parquet · val_probs_best.parquet`,
+      breaks: [
+        `The tokenizer must be the one saved next to the weights. Another one turns the same text into different numbers.`,
+        `Still to check: whether the .pt holds only the weights or also optimizer state and other training data.`,
+        `Inside the container the folder must appear at /models/transformer_runs/<run>/.`
+      ]
+    },
+
+    uvlock: {
+      plain: `A file written by uv that records the exact version of every package used in training. It is where we read the versions to pin: scikit-learn 1.9.1, numpy 2.5.4, torch 2.15.0 and transformers 5.22.2.`,
+      analogy: `The brand and batch number of every ingredient in the recipe, not just “flour”.`,
+      code: `grep -A1 -E '^name = "(scikit-learn|numpy|torch|transformers|joblib)"$' uv.lock
+
+name = "scikit-learn"
+version = "1.9.1"`,
+      breaks: [
+        `pyproject.toml says scikit-learn>=1.9.1, which is only a minimum. The real version lives in uv.lock.`,
+        `torch appears twice. The +cu132 build is for Windows, and on Linux the plain 2.15.0 is used.`
+      ]
+    },
+
+    reqs: {
+      plain: `The shopping list for the service environment. Packages that touch saved models are pinned with ==, so loading a file behaves exactly as in training. The web and API packages are left unpinned.`,
+      analogy: `A shopping list with exact products for the ingredients that must match, and “any brand” for the napkins.`,
+      code: `fastapi
+uvicorn[standard]
+streamlit
+requests
+pydantic
+pyyaml
+pandas
+sentencepiece
+protobuf
+joblib==1.6.0
+numpy==2.5.4
+scikit-learn==1.9.1
+torch==2.15.0
+transformers==5.22.2`,
+      breaks: [
+        `A different scikit-learn can fail to open the joblib files or, worse, open them and answer differently.`,
+        `numpy and torch must stay compatible with each other and with the saved weights.`,
+        `Unpinned packages such as FastAPI can change between two builds.`
+      ]
+    },
+
+    venv: {
+      plain: `A private folder holding only this project’s packages, built on Python 3.12 like training. It is created with uv and keeps the service apart from every other project on the computer.`,
+      analogy: `Your own toolbox: you take only the tools this job needs, and nobody else’s tools get mixed in.`,
+      code: `uv venv --python 3.12
+source .venv/bin/activate
+uv pip install -r requirements.txt`,
+      breaks: [
+        `The system Python can be newer than the one used in training. Always create the venv with the pinned 3.12.`,
+        `Forgetting to activate it runs the code with the wrong packages.`,
+        `The venv is not copied into Docker. The image installs its own packages from the same requirements.txt.`
+      ]
+    },
+
+    models_yaml: {
+      plain: `The registry book of the service: one block per model with its type, display name, file paths and label names. You add or switch off a model by editing this file, never the Python code.`,
+      analogy: `The restaurant’s staff roster: who works here, what each person does and where to find them.`,
+      code: `normalizer:
+  join_suffixes: false
+
+models:
+  tfidf_baseline:
+    display_name: "TF-IDF + Logistic Regression"
+    type: sklearn_tfidf
+    enabled: true
+    vectorizer: baseline_tfidf/vectorizer_tfidf12.joblib
+    heads:
+      recommendation:
+        file: baseline_tfidf/tfidf12_rec_B.joblib
+        labels: {0: recommended, 1: not_recommended, 2: no_idea}
+      rating_band:
+        file: baseline_tfidf/tfidf12_band_B.joblib
+        labels: {0: low, 1: medium, 2: high}`,
+      breaks: [
+        `A wrong path makes only that one model fail, and /ready lists the error.`,
+        `A type with no loader in MODEL_TYPES is reported as unknown.`,
+        `The label numbers must match config.json from training, or the names get swapped.`
+      ]
+    },
+
+    registry: {
+      plain: `Reads models.yaml when the service starts, picks the right loader class for each model type, loads every enabled model once and keeps it in memory. The API and the page ask it for models by id.`,
+      analogy: `The manager who reads the roster in the morning, calls each chef in, and later sends every order to the right one.`,
+      code: `# shortened from app/core/registry.py
+MODEL_TYPES = {"sklearn_tfidf": SklearnTfidfModel}
+MODELS_ROOT = os.environ.get("MODELS_ROOT", "artifacts")
+
+def load_all(self):
+    for model_id, cfg in self.config["models"].items():
+        if not cfg.get("enabled", True):
+            continue
+        cls = MODEL_TYPES.get(cfg["type"])
+        if cls is None:
+            self.errors[model_id] = "unknown type"
+            continue
+        try:
+            model = cls(model_id, cfg, self.models_root)
+            model.load()
+            self.models[model_id] = model
+        except Exception as e:
+            self.errors[model_id] = str(e)`,
+      breaks: [
+        `If one model fails to load, only that model lands in errors. The others keep working.`,
+        `MODELS_ROOT must point at the artifacts folder: /models in Docker, a local path otherwise.`,
+        `Models are loaded once at startup, so editing models.yaml needs an API restart.`
+      ]
+    },
+
+    sklearn_loader: {
+      plain: `The loader for TF-IDF models. It reads the vectorizer and both heads from disk. For a text it vectorizes once, asks each head for probabilities and returns them in the shared shape.`,
+      analogy: `The chef who knows this particular cuisine: he prepares the ingredients once, then cooks both dishes from them.`,
+      code: `def predict(self, text):
+    X = self.vectorizer.transform([text])
+    result = {}
+    for head_name, (clf, labels) in self.heads.items():
+        probs = clf.predict_proba(X)[0]
+        by_label = {labels[int(c)]: float(p)
+                    for c, p in zip(clf.classes_, probs)}
+        result[head_name] = {"label": max(by_label, key=by_label.get),
+                             "probabilities": by_label}
+    return result`,
+      breaks: [
+        `If the vectorizer and a head come from different training runs, the shapes may match but the answers are wrong.`,
+        `It expects text that is already normalized. The API does that before calling predict().`,
+        `A scikit-learn version mismatch can break joblib.load.`
+      ]
+    },
+
+    base_model: {
+      plain: `The contract every model signs: load() once at startup and predict(text) for each request, always returning the same shape. This is why the API and the page never need to know what kind of model they are talking to.`,
+      analogy: `The job description every chef must meet. Whatever the cuisine, they can be hired, and the waiters take their orders the same way.`,
+      code: `class BaseModel(ABC):
+    @abstractmethod
+    def load(self) -> None: ...
+
+    @abstractmethod
+    def predict(self, text: str) -> dict:
+        """-> {"recommendation": {...}, "rating_band": {...}}"""`,
+      breaks: [
+        `A loader that forgets load() or predict() cannot even be created: Python refuses.`,
+        `If a new loader returns a different shape, the API fails when it builds the response.`
+      ]
+    }
+  });
+})();
+
+// ===== PART 2c : DETAIL TEXT, chapters 04-07 =====
+(() => {
+  const R = String.raw;   // keeps backslashes (line continuations) exactly as written
+  Object.assign(ATLAS.data.detail, {
+
+    /* ---------------- 04 API ---------------- */
+    main_py: {
+      plain: `Creates the FastAPI app. When the service starts it builds the registry and loads every enabled model once, then it opens the doors. Models are never loaded inside a request.`,
+      analogy: `The opening routine: unlock the doors, wake the manager, hang the menu outside. It happens once, before the first customer.`,
+      code: `@asynccontextmanager
+async def lifespan(app: FastAPI):
+    registry = ModelRegistry()
+    registry.load_all()            # every enabled model, once
+    app.state.registry = registry
+    yield                          # the service runs here
+
+app = FastAPI(title="Digikala Review API", lifespan=lifespan)`,
+      breaks: [
+        `Loading takes seconds. Until it finishes, the service cannot answer.`,
+        `The routes are plain def functions on purpose: FastAPI runs them in worker threads, so one slow prediction does not freeze the other routes.`,
+        `Models live inside one process. Extra worker processes would each load their own copy.`
+      ]
+    },
+
+    schemas: {
+      plain: `Defines the shape of every request and response with Pydantic. FastAPI checks incoming data against these shapes and refuses bad input before any of our code runs. The request has only two fields, so labels and ratings can never be sent.`,
+      analogy: `The order form. Waiters can only write in the boxes it has, and a form with an empty or overlong order is sent back at the door.`,
+      code: `class PredictRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=5000)
+    model_id: str
+
+class PredictResponse(BaseModel):
+    model_id: str
+    model_name: str
+    normalizer_version: str
+    recommendation: HeadResult
+    rating_band: HeadResult
+    latency_ms: float`,
+      breaks: [
+        `Text longer than 5000 characters is refused with 422.`,
+        `The response shape is a promise. A loader that returns other keys fails when the response is built.`,
+        `The /docs page is generated from these classes, so it always matches the code.`
+      ]
+    },
+
+    endpoints: {
+      plain: `The doors of the service. Each route does one job, and together they let the outside world check health, list models, clean text and get predictions.`,
+      analogy: `The front door (/predict), the host stand that tells you which chefs are in today (/models), an “open?” sign (/health) and a kitchen check (/ready).`,
+      code: `GET   /health      {"status": "ok"}
+GET   /ready       loaded models and load errors (503 if none loaded)
+GET   /models      [{"id": ..., "name": ...}]
+POST  /normalize   original text, cleaned text, normalizer version
+POST  /predict     labels, probabilities, model name, latency`,
+      breaks: [
+        `/health only says the process is alive. /ready says whether models actually loaded.`,
+        `latency_ms covers the model’s prediction only, not the network or the cleaning step.`,
+        `No route accepts labels or ratings, by design.`
+      ]
+    },
+
+    normalize_py: {
+      plain: `Cleans every review before the model sees it: Arabic letters become Persian ones, spaces and invisible marks are tidied, URLs and HTML are handled and emojis are spaced. It is a copy of the normalizer used for training, in plain Python with no extra libraries.`,
+      analogy: `The prep station. Every order is washed and cut the same way before cooking, because the chefs were taught on ingredients prepared exactly like this.`,
+      code: `normalize_text("كيفيت ممتاز😍")   ->  "کیفیت ممتاز 😍"
+normalize_text("   ")              ->  None      # blank or URL only
+
+NORMALIZER_VERSION = "2.1"
+join_suffixes = False              # same setting as in training`,
+      breaks: [
+        `Serving must use the same version and the same join_suffixes as training. A mismatch lowers accuracy without any error message.`,
+        `Blank or URL-only text returns None, and the API answers 422.`,
+        `It is a copy. If the training normalizer changes, copy it again and raise the version number.`
+      ]
+    },
+
+    errors: {
+      plain: `Instead of crashing, the API answers bad situations with a clear status code. The web page turns each code into a short message and a picture.`,
+      analogy: `Polite signs at the door: “no empty orders” (422), “we have no chef by that name” (400), “the kitchen is not ready yet” (503).`,
+      code: `400  unknown model_id                         predict()
+422  empty text, spaces only, or URL only     schema and _normalize()
+503  no model finished loading                ready()
+500  anything unexpected                      FastAPI default`,
+      breaks: [
+        `The review text is never written to the logs.`,
+        `A 503 often means MODELS_ROOT or the volume path is wrong. /ready lists the exact error per model.`,
+        `The UI has a picture only for codes it knows. Any other code shows just the text.`
+      ]
+    },
+
+    tests: {
+      plain: `Plan: at least five automatic tests that call the API the way a client would, without starting a server. Not written yet.`,
+      analogy: `The taste tester who tries every dish before the doors open, and does it again after every change.`,
+      code: `# example of the planned style
+from fastapi.testclient import TestClient
+from app.main import app
+
+def test_health():
+    with TestClient(app) as client:      # "with" runs the lifespan
+        assert client.get("/health").json() == {"status": "ok"}`,
+      breaks: [
+        `Tests that start the app also load the models, so they need access to the artifacts folder.`,
+        `Good cases to cover: health, predict, unknown model (400), blank text (422) and the models list.`
+      ]
+    },
+
+    /* ---------------- 05 Web UI ---------------- */
+    app_py: {
+      plain: `The whole web page in one Streamlit script. It never loads a model. It asks the API for the model list, sends the review and draws what comes back. Streamlit runs the script again from the top at every click.`,
+      analogy: `The dining room. The waiter only carries orders to the kitchen window and brings plates back. He never cooks.`,
+      code: `API_URL = os.environ.get("API_URL", "http://127.0.0.1:8000")
+models = requests.get(f"{API_URL}/models", timeout=5).json()
+
+choice = st.selectbox("Model", list(names))
+text = st.text_area("Review text", height=150)
+
+if st.button("Predict"):
+    if not text.strip():
+        st.warning("Please enter a review text first.")
+        st.stop()
+    resp = requests.post(f"{API_URL}/predict", timeout=120,
+                         json={"text": text, "model_id": names[choice]})`,
+      breaks: [
+        `Because the script reruns on every click, nothing heavy may sit at the top.`,
+        `Inside compose the address must be http://api:8000. 127.0.0.1 would point at the page’s own container.`,
+        `If the API is unreachable the page shows a message and stops.`
+      ]
+    },
+
+    picker: {
+      plain: `The model dropdown. Its options are not written in the page. They come from the API’s /models route, so a model that is added to models.yaml shows up here by itself.`,
+      analogy: `A menu board that is rewritten from the kitchen’s roster every time the page loads.`,
+      code: `names = {m["name"]: m["id"] for m in models}
+choice = st.selectbox("Model", list(names))`,
+      breaks: [
+        `A new model appears after the API restarts and the page is reloaded.`,
+        `A model that failed to load is missing from the list. /ready tells you why.`
+      ]
+    },
+
+    results: {
+      plain: `Shows the answer for both heads: the winning label as a heading and a bar for the probability of every class, plus the model name and the latency.`,
+      analogy: `The plated dish with its tasting notes: the main flavor and the percentage of each one.`,
+      code: `st.caption(f"{data['model_name']} | {data['latency_ms']} ms")
+for head in ("recommendation", "rating_band"):
+    st.subheader(f"{head}: {data[head]['label']}")
+    st.bar_chart(data[head]["probabilities"])`,
+      breaks: [
+        `Bars are probabilities, not certainty. For a mixed review, no idea 0.50 and recommended 0.45 are close.`,
+        `The two heads can disagree, and that is normal.`
+      ]
+    },
+
+    dog: {
+      plain: `When the API answers with an error code, the page shows the message and a picture for that code, so failures are friendly instead of confusing.`,
+      analogy: `An apology card with a cute drawing, instead of a closed door with no explanation.`,
+      code: `ERROR_IMAGE_URL = "https://httpstatusdogs.com/img/picture-perfect/{code}.jpg"
+
+def show_error(resp):
+    st.error(f"Error {resp.status_code}: {resp.text}")
+    st.image(ERROR_IMAGE_URL.format(code=resp.status_code), width=400)`,
+      breaks: [
+        `The picture comes from the internet. Offline, the message still shows and the picture is missing.`,
+        `The URL pattern sits in one place, so switching to another site is a one-line change.`
+      ]
+    },
+
+    /* ---------------- 06 Docker ---------------- */
+    dockerfile: {
+      plain: `Two recipes for building two images. The API recipe starts from Python 3.12, installs the pinned packages, copies the code and settings, and defines how to start. The UI recipe only installs Streamlit.`,
+      analogy: `The step-by-step instructions for packing a food truck. Each step becomes a layer, and unchanged steps are reused next time.`,
+      code: R`FROM python:3.12-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN --mount=type=bind,source=wheels,target=/wheels \
+    pip install --no-cache-dir --no-index --find-links=/wheels -r requirements.txt
+COPY app ./app
+COPY models.yaml .
+ENV MODELS_ROOT=/models
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]`,
+      breaks: [
+        `Order matters: the slow package step sits above the code, so a code change rebuilds in seconds (see the Docker layers tab in the Lab).`,
+        `Packages are installed from a local wheels/ folder, so the build needs no internet. That folder must exist in the build context.`,
+        `The server must listen on 0.0.0.0. Inside a container, 127.0.0.1 is unreachable from outside.`
+      ]
+    },
+
+    image_api: {
+      plain: `A frozen snapshot of everything the API needs: Python, the pinned packages (torch and CUDA libraries make it large) and our code. It does not contain any model file.`,
+      analogy: `A packed food truck: equipment and recipes are loaded, the ingredients are not. Those arrive through the pantry window.`,
+      code: `docker build -t digikala-review-api .
+docker images digikala-review-api
+
+IMAGE                        DISK USAGE   CONTENT SIZE
+digikala-review-api:latest   10.1GB       3.36GB`,
+      breaks: [
+        `It is big because of torch and the CUDA libraries, not because of our code.`,
+        `Building needs several gigabytes of free disk space at its peak, more than the final size.`,
+        `Changing a model does not require a rebuild, because models are mounted from outside.`
+      ]
+    },
+
+    image_ui: {
+      plain: `A second, much smaller snapshot for the web page. It has only Python, Streamlit and requests, because the page never touches a model.`,
+      analogy: `A small cart for the dining room. It needs plates and a notepad, not an industrial stove.`,
+      code: `# Dockerfile.ui (shortened)
+FROM python:3.12-slim
+WORKDIR /app
+RUN pip install --no-cache-dir streamlit requests
+COPY ui ./ui
+EXPOSE 8501
+CMD ["streamlit", "run", "ui/app.py", "--server.port=8501", "--server.address=0.0.0.0"]`,
+      breaks: [
+        `Two images means the page can be rebuilt and restarted without touching the heavy API image.`,
+        `This image has no torch. If the page ever imported a model, it would fail here.`
+      ]
+    },
+
+    compose: {
+      plain: `One file that describes the whole system: two services, their ports, the model volume, the address of the API for the page and the restart policy. One command starts everything.`,
+      analogy: `The event plan: how many trucks, where each one parks, how they reach each other and which pantry they share.`,
+      code: `services:
+  api:
+    build: .
+    ports: ["8000:8000"]
+    volumes:
+      - ../digikala-review-transformer/artifacts:/models:ro
+    # GPU: uncomment when the encoders arrive
+    # deploy: ...
+    restart: unless-stopped
+
+  ui:
+    build: { context: ., dockerfile: Dockerfile.ui }
+    ports: ["8501:8501"]
+    environment:
+      API_URL: http://api:8000
+    depends_on: [api]
+    restart: unless-stopped`,
+      breaks: [
+        `Relative paths are measured from the folder that holds the compose file.`,
+        `Inside this network the services reach each other by name: the page uses http://api:8000.`,
+        `docker compose down stops everything. restart: unless-stopped brings the containers back after a reboot unless you stopped them yourself.`
+      ]
+    },
+
+    volume: {
+      plain: `The training repo’s artifacts folder, shared with the API container at /models. Nothing is copied, and the container can only read it. Adding a model means putting its files in that folder.`,
+      analogy: `A pantry window. The kitchen looks into the shared pantry and takes what it needs, but nobody copies the pantry and nobody can rearrange its shelves.`,
+      code: `volumes:
+  - ../digikala-review-transformer/artifacts:/models:ro
+
+# inside the container
+MODELS_ROOT=/models
+# models.yaml paths are relative to it, e.g. baseline_tfidf/tfidf12_rec_B.joblib`,
+      breaks: [
+        `If the host path is wrong, the container may see an empty folder, and /ready reports the load errors.`,
+        `A symlink that points outside the mounted folder does not work inside the container.`,
+        `:ro protects your training outputs from being changed by the service.`
+      ]
+    },
+
+    cont_api: {
+      plain: `The running API: an image started with the volume attached. It loads the models into memory, then waits for requests on port 8000.`,
+      analogy: `The kitchen truck with its engine running: chefs in place, window open.`,
+      code: `docker compose up
+api-1  | Application startup complete.
+api-1  | Uvicorn running on http://0.0.0.0:8000
+
+curl http://127.0.0.1:8000/ready
+{"status":"ready","loaded":["tfidf_baseline"],"errors":{}}`,
+      breaks: [
+        `“port is already allocated” means another program, such as a local uvicorn or an old container, holds port 8000.`,
+        `Status “ready” with an empty errors object is the sign that every model loaded.`,
+        `The first start takes a few seconds while the models load.`
+      ]
+    },
+
+    cont_ui: {
+      plain: `The running web page on port 8501. It talks to the API container through the compose network and your browser talks to it through the published port.`,
+      analogy: `The dining-room cart, wheeled up to the kitchen window. Guests only ever see this one.`,
+      code: `ui-1  | You can now view your Streamlit app in your browser.
+ui-1  | Local URL: http://localhost:8501`,
+      breaks: [
+        `depends_on only waits for the API container to start, not to finish loading. Reload the page if it opened too early.`,
+        `A wrong API_URL gives “API is not reachable”.`,
+        `The server must listen on 0.0.0.0 or the browser cannot connect.`
+      ]
+    },
+
+    /* ---------------- 07 Encoders (planned) ---------------- */
+    encoder_loader: {
+      plain: `Plan: a second loader class that follows the same contract as the TF-IDF one. It rebuilds an encoder from its run folder, loads the saved weights and tokenizer, moves the model to the GPU and returns the same two-head answer. Not written yet.`,
+      analogy: `A new chef with a different specialty who still signs the same job description. The waiters take his orders exactly as before.`,
+      code: `# plan: app/core/transformer_encoder.py
+class TransformerEncoderModel(BaseModel):
+    def load(self):
+        # tokenizer from the local folder only, never from the internet
+        # build the encoder and two heads from encoder_config.json
+        # load the weights from the .pt file, move to "cuda", eval mode
+        ...
+    def predict(self, text):
+        # tokenize with the saved max length, run under torch.no_grad(),
+        # softmax for each head, return the shared shape
+        ...
+
+# registry.py gets one new line
+MODEL_TYPES["transformer_encoder"] = TransformerEncoderModel`,
+      breaks: [
+        `Still to check: what exactly is inside the .pt file (weights only, or more).`,
+        `The tokenizer must be the one saved next to the weights, loaded with local_files_only=True.`,
+        `Long reviews are cut at the maximum length used in training.`
+      ]
+    },
+
+    gpu: {
+      plain: `Plan: give the API container access to the graphics card, so the encoders run on it. The host side is ready: Docker can already see the card.`,
+      analogy: `The fast stove in the kitchen. It has only a few burners (8 GB), so every pot must earn its place.`,
+      code: `# the check that already passed
+docker run --rm --gpus all ubuntu nvidia-smi    ->  RTX 4060, 8188 MiB
+
+# to be uncommented in docker-compose.yml
+deploy:
+  resources:
+    reservations:
+      devices:
+        - driver: nvidia
+          count: all
+          capabilities: [gpu]`,
+      breaks: [
+        `A model that expects CUDA while the container runs on CPU fails at startup.`,
+        `Running out of GPU memory raises an out-of-memory error. This is why idle models are unloaded.`,
+        `The baseline never needs the GPU and keeps working without it.`
+      ]
+    },
+
+    idle: {
+      plain: `Plan: if nobody has used an encoder for 10 minutes, free its GPU memory. The next request loads it again, and the encoder that was asked for loads first. The TF-IDF baseline is never unloaded.`,
+      analogy: `Turning a burner off when nobody is ordering, and lighting it again as soon as an order arrives.`,
+      code: `# planned settings in models.yaml
+runtime:
+  idle_unload_seconds: 600      # 0 = never unload
+
+models:
+  <encoder>:
+    unloadable: true            # the baseline stays false
+
+# a background check runs every ~30 s; a lock stops two requests
+# from loading the same model twice`,
+      breaks: [
+        `The first request after unloading is slow, because the checkpoint is read from disk and moved to the GPU.`,
+        `Two requests arriving together must not load the same model twice, so loading is guarded by a lock.`,
+        `The page should show “loading model…” during a cold start.`
+      ]
+    }
+  });
+})();
+
 // ===== PART 3 : ENGINE =====
 (() => {
   const { $, $$ } = ATLAS, D = ATLAS.data, S = ATLAS.state;
