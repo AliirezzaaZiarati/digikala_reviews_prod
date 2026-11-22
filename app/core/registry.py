@@ -4,13 +4,15 @@ import yaml
 
 from app.core.base import BaseModel
 from app.core.sklearn_tfidf import SklearnTfidfModel
+from app.core.transformer_encoder import TransformerEncoderModel
 
-# جدول نوع -> کلاس. انکودرها بعداً اینجا یک خط اضافه می‌کنند.
+# Type -> Class mapping. Encoders will add an entry here later.
 MODEL_TYPES: dict[str, type[BaseModel]] = {
     "sklearn_tfidf": SklearnTfidfModel,
+    "transformer_encoder": TransformerEncoderModel,
 }
 
-# مسیرها از متغیر محیطی خوانده می‌شوند تا هم روی سیستم و هم در داکر کار کنند
+# Paths are read from an environment variable so that they work both on the system and in Docker.
 MODELS_ROOT = os.environ.get("MODELS_ROOT", "artifacts")
 CONFIG_PATH = os.environ.get("MODELS_CONFIG", "models.yaml")
 
@@ -24,7 +26,7 @@ class ModelRegistry:
         self.errors: dict[str, str] = {}
 
     def load_all(self) -> None:
-        """همه‌ی مدل‌های فعال را load می‌کند. خرابی یک مدل بقیه را نمی‌خواباند."""
+        """It loads all active models. The failure of one model does not bring down the others."""
         for model_id, cfg in self.config["models"].items():
             if not cfg.get("enabled", True):
                 continue

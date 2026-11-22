@@ -5,3 +5,6 @@ artifacts/
 *.pt
 *.joblib
 wheels/
+
+# personal note
+note.txt

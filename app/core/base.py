@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 
 
 class BaseModel(ABC):
-    """قرارداد مشترک: هر مدل باید load و predict داشته باشد."""
+    """Common contract: Every model must have `load` and `predict` methods."""
 
     def __init__(self, model_id: str, cfg: dict, models_root: str):
         self.model_id = model_id
@@ -12,8 +12,8 @@ class BaseModel(ABC):
 
     @abstractmethod
     def load(self) -> None:
-        """فایل‌های مدل را یک بار در حافظه بارگذاری می‌کند."""
+        """It loads the model files into memory once."""
 
     @abstractmethod
     def predict(self, text: str) -> dict:
-        """متن نرمال‌شده را می‌گیرد و خروجی هر هد را برمی‌گرداند."""
+        """It takes the normalized text and returns the output of each head."""

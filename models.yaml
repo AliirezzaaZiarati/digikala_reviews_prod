@@ -14,3 +14,61 @@ models:
       rating_band:
         file: baseline_tfidf/tfidf12_band_B.joblib
         labels: {0: low, 1: medium, 2: high}
+  mdeberta_B:
+    display_name: "mDeBERTa-v3 (fine-tuned, variant B)"
+    type: transformer_encoder
+    enabled: true
+    run_dir: transformer_runs/mdeberta_B
+    checkpoint: mdeberta_B_best_model.pt
+    device: auto
+    heads:
+      recommendation:
+        checkpoint_head: rec
+        labels: {0: recommended, 1: not_recommended, 2: no_idea}
+      rating_band:
+        checkpoint_head: band
+        labels: {0: low, 1: medium, 2: high}
+  roberta_B:
+    display_name: "roberta-fa-zwnj (fine-tuned, variant B)"
+    type: transformer_encoder
+    enabled: true
+    run_dir: transformer_runs/roberta_B
+    checkpoint: roberta_B_best_model.pt
+    device: auto
+    heads:
+      recommendation:
+        checkpoint_head: rec
+        labels: {0: recommended, 1: not_recommended, 2: no_idea}
+      rating_band:
+        checkpoint_head: band
+        labels: {0: low, 1: medium, 2: high}
+
+  tooka_B:
+    display_name: "TookaBERT (fine-tuned, variant B)"
+    type: transformer_encoder
+    enabled: true
+    run_dir: transformer_runs/tooka_B
+    checkpoint: tooka_B_best_model.pt
+    device: auto
+    heads:
+      recommendation:
+        checkpoint_head: rec
+        labels: {0: recommended, 1: not_recommended, 2: no_idea}
+      rating_band:
+        checkpoint_head: band
+        labels: {0: low, 1: medium, 2: high}
+
+  tooka_C:
+    display_name: "TookaBERT (fine-tuned, variant C, sample weights)"
+    type: transformer_encoder
+    enabled: true
+    run_dir: transformer_runs/tooka_C
+    checkpoint: tooka_C_best_model.pt
+    device: auto
+    heads:
+      recommendation:
+        checkpoint_head: rec
+        labels: {0: recommended, 1: not_recommended, 2: no_idea}
+      rating_band:
+        checkpoint_head: band
+        labels: {0: low, 1: medium, 2: high}
