@@ -315,10 +315,789 @@ body::before{ /* faint dot grid */
   }));
 })();
 
-// ===== PART 2 : GRAPH DATA (chapters, nodes, wires, scenes) goes here =====
-// ===== PART 3 : ENGINE (atlas rendering, wires, zoom, drawer content) goes here =====
-// ===== PART 4 : STORY MODE + PRESENTER MODE + REQUEST JOURNEY goes here =====
-// ===== PART 5 : EXTRAS (error lab, YAML simulator, Dockerfile layers, memory meter, glossary) goes here =====
+// ===== PART 2 : GRAPH DATA =====
+(() => {
+  const D = ATLAS.data;
+
+  D.zones = { training: 'Training world', repo: 'Production repo', container: 'Container world' };
+
+  // Each wire type belongs to one layer button in the top bar
+  D.wireTypes = {
+    runtime: { name: 'Runtime', layer: 'runtime', color: 'var(--runtime)' },
+    files:   { name: 'Files',   layer: 'files',   color: 'var(--files)' },
+    config:  { name: 'Config',  layer: 'code',    color: 'var(--config)' },
+    import:  { name: 'Import',  layer: 'code',    color: 'var(--import)' },
+    build:   { name: 'Build',   layer: 'build',   color: 'var(--build)' }
+  };
+
+  // x, y are positions on a 1000 x 600 virtual canvas (the engine scales them)
+  D.chapters = [
+    { id: 'artifacts', num: '01', title: 'Artifacts', sub: 'What training hands over', zone: 'training', x: 130, y: 300, status: 'done',
+      blurb: 'Saved model files from training: the baseline and the encoder runs.' },
+    { id: 'env', num: '02', title: 'Environment', sub: 'Same versions as training', zone: 'repo', x: 340, y: 95, status: 'done',
+      blurb: 'A pinned Python environment that matches training exactly.' },
+    { id: 'contract', num: '03', title: 'Contract & soft-code', sub: 'One shape for every model', zone: 'repo', x: 400, y: 330, status: 'done',
+      blurb: 'One shared shape for every model, plus a registry driven by models.yaml.' },
+    { id: 'api', num: '04', title: 'API', sub: 'FastAPI service', zone: 'repo', x: 650, y: 170, status: 'done',
+      blurb: 'Routes, validation, text normalization and clear error codes.' },
+    { id: 'ui', num: '05', title: 'Web UI', sub: 'Streamlit page', zone: 'repo', x: 880, y: 300, status: 'done',
+      blurb: 'A page that only talks to the API and never touches a model.' },
+    { id: 'docker', num: '06', title: 'Docker', sub: 'Run it anywhere', zone: 'container', x: 650, y: 470, status: 'done',
+      blurb: 'Images, containers, one network and a read-only model volume.' },
+    { id: 'encoders', num: '07', title: 'Encoders', sub: 'Next: three Transformers', zone: 'repo', x: 170, y: 500, status: 'next',
+      blurb: 'Drop in three checkpoints, use the GPU, free it when idle.' }
+  ];
+
+  // N(id, chapter, label, subtitle, kind, x, y, one-line tag, isNext)
+  const N = (id, ch, label, sub, kind, x, y, tag, next) => ({ id, ch, label, sub, kind, x, y, tag, status: next ? 'next' : 'done' });
+  D.nodes = [
+    // 01 Artifacts
+    N('training_repo', 'artifacts', 'Training repo', 'notebooks, scripts, artifacts/', 'repo', 120, 290, 'Where models are trained and saved.'),
+    N('vectorizer', 'artifacts', 'Vectorizer', 'vectorizer_tfidf12.joblib', 'file', 440, 140, 'Turns text into 500k TF-IDF numbers.'),
+    N('lr_rec', 'artifacts', 'Recommendation head', 'tfidf12_rec_B.joblib', 'file', 790, 80, 'Predicts recommended, not recommended or no idea.'),
+    N('lr_band', 'artifacts', 'Rating-band head', 'tfidf12_band_B.joblib', 'file', 790, 260, 'Predicts low, medium or high.'),
+    N('enc_folder', 'artifacts', 'Encoder run folder', '.pt, tokenizer/, encoder_config.json', 'file', 440, 450, 'Weights and tokenizer of one fine-tuned encoder.', true),
+    // 02 Environment
+    N('uvlock', 'env', 'uv.lock', 'training repo', 'file', 130, 270, 'Exact versions the models were trained with.'),
+    N('reqs', 'env', 'requirements.txt', 'pinned with ==', 'config', 470, 270, 'The shopping list for the environment.'),
+    N('venv', 'env', '.venv', 'Python 3.12', 'env', 830, 140, 'An isolated box of packages for this project.'),
+    // 03 Contract & soft-code
+    N('models_yaml', 'contract', 'models.yaml', 'the model registry book', 'config', 110, 130, 'Lists every model and where its files are.'),
+    N('registry', 'contract', 'registry.py', 'app/core', 'script', 430, 270, 'Loads each enabled model once at startup.'),
+    N('sklearn_loader', 'contract', 'sklearn_tfidf.py', 'app/core', 'script', 780, 150, 'Loads the baseline and predicts with it.'),
+    N('base_model', 'contract', 'base.py', 'app/core', 'script', 430, 470, 'The contract: every model has load() and predict().'),
+    // 04 API
+    N('main_py', 'api', 'main.py', 'app', 'script', 110, 270, 'Creates the app and loads models once.'),
+    N('schemas', 'api', 'prediction.py', 'app/schemas', 'script', 440, 80, 'Pydantic shapes for requests and responses.'),
+    N('endpoints', 'api', 'Endpoints', '/health /ready /models /normalize /predict', 'route', 440, 270, 'The doors the outside world can knock on.'),
+    N('normalize_py', 'api', 'normalize.py', 'app/core, v2.1', 'script', 790, 110, 'Cleans text exactly like training did.'),
+    N('errors', 'api', 'Error codes', '400, 422, 503', 'concept', 790, 330, 'Clear refusals instead of crashes.'),
+    N('tests', 'api', 'TestClient tests', 'tests/', 'script', 440, 470, 'Automatic checks for every route.', true),
+    // 05 Web UI
+    N('app_py', 'ui', 'app.py', 'ui', 'script', 110, 270, 'The whole Streamlit page in one script.'),
+    N('picker', 'ui', 'Model picker', 'filled from /models', 'widget', 450, 110, 'A dropdown built from what the API reports.'),
+    N('results', 'ui', 'Result view', 'probability bars', 'widget', 790, 160, 'Label and probabilities for both heads.'),
+    N('dog', 'ui', 'Error view', 'status-code image', 'widget', 790, 400, 'A friendly picture for every error code.'),
+    // 06 Docker
+    N('dockerfile', 'docker', 'Dockerfiles', 'Dockerfile, Dockerfile.ui', 'build', 110, 150, 'Recipes for building the two images.'),
+    N('image_api', 'docker', 'API image', 'digikala-review-api', 'image', 440, 80, 'A frozen snapshot: Python, packages and our code.'),
+    N('image_ui', 'docker', 'UI image', 'digikala-review-ui', 'image', 440, 260, 'A small snapshot with only Streamlit.'),
+    N('compose', 'docker', 'docker-compose.yml', 'one command starts all', 'config', 110, 430, 'Describes both containers, ports and the volume.'),
+    N('volume', 'docker', 'Model volume', '/models (read-only)', 'volume', 440, 470, 'Shares the artifacts folder without copying it.'),
+    N('cont_api', 'docker', 'api container', 'port 8000', 'container', 790, 150, 'The running API with models in memory.'),
+    N('cont_ui', 'docker', 'ui container', 'port 8501', 'container', 790, 380, 'The running web page.'),
+    // 07 Encoders (next)
+    N('encoder_loader', 'encoders', 'transformer_encoder.py', 'app/core', 'script', 120, 270, 'Rebuilds an encoder from its folder and runs it.', true),
+    N('gpu', 'encoders', 'GPU access', 'compose + CUDA', 'infra', 470, 110, 'Moves the encoder onto the graphics card.', true),
+    N('idle', 'encoders', 'Idle unload', '10 min, then free VRAM', 'concept', 470, 430, 'Frees GPU memory when nobody is using it.', true)
+  ];
+
+  // W(from, to, type, what moves, isNext)
+  const W = (from, to, type, label, next) => ({ id: from + '>' + to, from, to, type, label, status: next ? 'next' : 'done' });
+  D.wires = [
+    // artifacts
+    W('training_repo', 'vectorizer', 'files', 'saved'),
+    W('training_repo', 'enc_folder', 'files', 'saved'),
+    W('vectorizer', 'lr_rec', 'runtime', 'features'),
+    W('vectorizer', 'lr_band', 'runtime', 'features'),
+    W('training_repo', 'normalize_py', 'files', 'src/normalize.py copied'),
+    // environment
+    W('uvlock', 'reqs', 'config', 'versions copied'),
+    W('reqs', 'venv', 'build', 'uv pip install'),
+    W('reqs', 'dockerfile', 'build', 'pip install in image'),
+    // contract
+    W('models_yaml', 'registry', 'config', 'read at startup'),
+    W('registry', 'sklearn_loader', 'import', 'MODEL_TYPES'),
+    W('sklearn_loader', 'base_model', 'import', 'inherits'),
+    W('registry', 'base_model', 'import', 'type hint'),
+    W('vectorizer', 'sklearn_loader', 'files', 'joblib.load'),
+    W('lr_rec', 'sklearn_loader', 'files', 'joblib.load'),
+    W('lr_band', 'sklearn_loader', 'files', 'joblib.load'),
+    // api
+    W('main_py', 'registry', 'import', 'load_all() at startup'),
+    W('main_py', 'endpoints', 'import', 'defines routes'),
+    W('schemas', 'endpoints', 'import', 'validates input'),
+    W('endpoints', 'normalize_py', 'runtime', 'review text'),
+    W('endpoints', 'registry', 'runtime', 'get(model_id).predict()'),
+    W('endpoints', 'errors', 'runtime', 'raises'),
+    W('tests', 'endpoints', 'runtime', 'TestClient', true),
+    // ui
+    W('app_py', 'picker', 'import', 'renders'),
+    W('app_py', 'results', 'import', 'renders'),
+    W('app_py', 'dog', 'import', 'renders'),
+    W('picker', 'endpoints', 'runtime', 'GET /models'),
+    W('results', 'endpoints', 'runtime', 'POST /predict'),
+    W('errors', 'dog', 'runtime', 'status code'),
+    // docker
+    W('dockerfile', 'image_api', 'build', 'docker build'),
+    W('dockerfile', 'image_ui', 'build', 'docker build'),
+    W('main_py', 'image_api', 'build', 'COPY app'),
+    W('models_yaml', 'image_api', 'build', 'COPY models.yaml'),
+    W('app_py', 'image_ui', 'build', 'COPY ui'),
+    W('image_api', 'cont_api', 'build', 'docker run'),
+    W('image_ui', 'cont_ui', 'build', 'docker run'),
+    W('compose', 'cont_api', 'config', 'ports, volume'),
+    W('compose', 'cont_ui', 'config', 'API_URL'),
+    W('compose', 'volume', 'config', 'mount'),
+    W('training_repo', 'volume', 'files', 'artifacts/ folder'),
+    W('volume', 'cont_api', 'files', '/models, read-only'),
+    W('cont_ui', 'cont_api', 'runtime', 'http://api:8000'),
+    // encoders (next)
+    W('registry', 'encoder_loader', 'import', 'one new MODEL_TYPES line', true),
+    W('encoder_loader', 'base_model', 'import', 'inherits', true),
+    W('enc_folder', 'encoder_loader', 'files', '.pt + tokenizer', true),
+    W('encoder_loader', 'gpu', 'runtime', '.to("cuda")', true),
+    W('idle', 'encoder_loader', 'runtime', 'unload / lazy load', true),
+    W('compose', 'gpu', 'config', 'GPU reservation', true)
+  ];
+
+  // Parts 2b and 2c fill this: D.detail[nodeId] = { plain, analogy, code, io, breaks }
+  D.detail = {};
+
+  // Sanity check: every wire must connect two existing nodes, every node needs a chapter
+  const ids = new Set(D.nodes.map(n => n.id));
+  const chs = new Set(D.chapters.map(c => c.id));
+  const badWires = D.wires.filter(w => !ids.has(w.from) || !ids.has(w.to)).map(w => w.id);
+  const badNodes = D.nodes.filter(n => !chs.has(n.ch)).map(n => n.id);
+  const ph = ATLAS.$('.stage-placeholder');
+  if (badWires.length || badNodes.length) {
+    ph.textContent = 'Data problem: ' + badWires.concat(badNodes).join(', ');
+    ATLAS.toast('Data problem, see the stage box.');
+  } else {
+    ph.textContent = 'Data loaded: ' + D.chapters.length + ' chapters, ' + D.nodes.length + ' nodes, ' + D.wires.length + ' wires. The atlas itself appears after Part 3.';
+  }
+})();
+// ===== PART 3 : ENGINE =====
+(() => {
+  const { $, $$ } = ATLAS, D = ATLAS.data, S = ATLAS.state;
+  const stage = $('#stage');
+  document.getElementById('dsPreview')?.remove();
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  /* ---------- styles for the atlas (injected here so Part 3 is one paste) ---------- */
+  const css = `
+  [hidden]{display:none!important}
+  #stage{scroll-margin-top:5rem}
+  .stage-head{display:flex;flex-wrap:wrap;align-items:center;gap:1rem 1.5rem;margin-bottom:1rem}
+  .stage-head .numeral{font-size:clamp(3.5rem,7vw,5.5rem)}
+  .stage-head h2{font:400 clamp(1.8rem,3vw,2.6rem)/1.1 var(--f-display)}
+  .stage-head p{color:var(--ink-soft);max-width:34rem}
+  .stage-head .grow{flex:1;min-width:14rem}
+  .canvas{position:relative;width:min(100%,150vh);aspect-ratio:1000/600;margin:0 auto}
+  .canvas svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
+  .canvas .hit{stroke:transparent;stroke-width:22;fill:none;pointer-events:stroke;cursor:pointer}
+  .zin{animation:zin .55s cubic-bezier(.2,.8,.2,1)} .zout{animation:zout .55s cubic-bezier(.2,.8,.2,1)}
+  @keyframes zin{from{opacity:0;transform:scale(.9)}} @keyframes zout{from{opacity:0;transform:scale(1.08)}}
+  .wg,.lg{transition:opacity .2s}
+  .wg.dim,.lg.dim{opacity:.13} .wg.fade,.lg.fade{opacity:.1}
+  .wg.dim .packets,.wg.dim .files,.wg.dim .build{animation:none}
+  .lg rect{fill:var(--glass-solid);stroke:var(--glass-edge)}
+  .lg text{font:600 12.5px var(--f-mono);fill:var(--ink-soft)}
+  .node,.chap{position:absolute;transform:translate(-50%,-50%);text-align:left;color:var(--ink);cursor:pointer;
+    background:var(--glass-solid);border:1px solid var(--glass-edge);box-shadow:var(--shadow);transition:.2s;font-family:inherit}
+  .node{width:14.5rem;padding:.7rem .9rem;border-radius:16px;border-left:4px solid var(--kc,var(--runtime))}
+  .node:hover,.node.sel{transform:translate(-50%,-50%) translateY(-3px);border-color:var(--kc)}
+  .node .k{display:block;font:700 .78rem var(--f-mono);letter-spacing:.12em;color:var(--kc)}
+  .node.next .k::after{content:" · NEXT";color:var(--files)}
+  .node b{display:block;font-size:1.05rem;line-height:1.25}
+  .node small{display:block;color:var(--ink-soft);font-size:.88rem;line-height:1.3}
+  .next{border-style:dashed}
+  .chap{display:flex;gap:.9rem;align-items:center;width:14rem;padding:.8rem 1rem;border-radius:20px}
+  .chap:hover{transform:translate(-50%,-50%) scale(1.04);border-color:var(--runtime)}
+  .chap .num{font:400 2.4rem/1 var(--f-display);color:transparent;-webkit-text-stroke:1.3px var(--runtime-ink,var(--runtime))}
+  .chap b{display:block;font:600 1.1rem/1.2 var(--f-body)}
+  .chap small{display:block;color:var(--ink-soft);font-size:.88rem;line-height:1.3}
+  .chap em{display:block;margin-top:.25rem;font:600 .78rem var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);font-style:normal}
+  .key{display:flex;flex-wrap:wrap;gap:.6rem 1.4rem;justify-content:center;margin-top:1rem;color:var(--ink-soft)}
+  .ky{display:inline-flex;align-items:center;gap:.5rem;font-size:.95rem}
+  .hint{text-align:center;color:var(--ink-soft);margin-top:.6rem}
+  .xl{margin-top:1rem} .xl h4,.io-h{font:600 .85rem var(--f-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);margin:1rem 0 .6rem}
+  .chip{display:inline-flex;align-items:center;gap:.5rem;margin:0 .5rem .5rem 0;padding:.45rem .8rem;border-radius:999px;
+    border:1px solid var(--glass-edge);background:var(--glass);color:var(--ink);font:500 .92rem var(--f-body);cursor:pointer}
+  .chip:hover{border-color:var(--runtime)} .chip i,.dot{display:inline-block;width:.6rem;height:.6rem;border-radius:50%;margin-right:.5rem}
+  .chip em{color:var(--ink-faint);font-style:normal}
+  .lead{font-size:1.15rem;margin:1rem 0 .6rem} .muted{color:var(--ink-soft)}
+  .code{margin-top:1rem;padding:1rem;border-radius:14px;background:rgba(22,41,58,.07);border:1px solid var(--glass-edge);font:.9rem/1.5 var(--f-mono);overflow:auto;white-space:pre}
+  .list{padding-left:1.2rem;display:grid;gap:.6rem} .list li::marker{color:var(--ink-faint)} .list.wl{list-style:none;padding:0}
+  `;
+  const st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
+
+  /* ---------- lookups and helpers ---------- */
+  const nodeById = Object.fromEntries(D.nodes.map(n => [n.id, n]));
+  const chapById = Object.fromEntries(D.chapters.map(c => [c.id, c]));
+  const KIND = { script:['SCRIPT','--config'], file:['FILE','--files'], config:['CONFIG','--config'], env:['ENV','--build'], repo:['REPO','--import'],
+    route:['ROUTES','--runtime'], concept:['IDEA','--err'], widget:['WIDGET','--runtime'], build:['BUILD','--build'], image:['IMAGE','--build'],
+    volume:['VOLUME','--files'], container:['CONTAINER','--runtime'], infra:['INFRA','--files'] };
+  const PRIORITY = ['runtime', 'files', 'config', 'build', 'import'];
+  const layerOn = t => S.layer === 'all' || D.wireTypes[t].layer === S.layer;
+  const P = (x, y) => [80 + x * 0.84, 48 + y * 0.84];            // keeps cards away from the canvas edge
+  const inRect = (p, r, m = 0) => p[0] > r.x - m && p[0] < r.x + r.w + m && p[1] > r.y - m && p[1] < r.y + r.h + m;
+  const touch = (a, b, m = 0) => a.x < b.x + b.w + m && a.x + a.w > b.x - m && a.y < b.y + b.h + m && a.y + a.h > b.y - m;
+
+  // wires are quadratic curves: a = start, b = end, c = control point
+  const curve = (a, b, bend) => ({ a, b, c: [(a[0] + b[0]) / 2 - (b[1] - a[1]) * bend, (a[1] + b[1]) / 2 + (b[0] - a[0]) * bend] });
+  const at  = (g, t) => { const u = 1 - t; return [u*u*g.a[0] + 2*u*t*g.c[0] + t*t*g.b[0], u*u*g.a[1] + 2*u*t*g.c[1] + t*t*g.b[1]]; };
+  const tan = (g, t) => [2*(1-t)*(g.c[0]-g.a[0]) + 2*t*(g.b[0]-g.c[0]), 2*(1-t)*(g.c[1]-g.a[1]) + 2*t*(g.b[1]-g.c[1])];
+
+  // cards are real HTML, so we measure them to know where wires should end
+  function measure(canvas) {
+    const cr = canvas.getBoundingClientRect(), k = 1000 / cr.width, R = {};
+    $$('[data-id]', canvas).forEach(el => {
+      const r = el.getBoundingClientRect();
+      R[el.dataset.id] = { x: (r.left - cr.left) * k, y: (r.top - cr.top) * k, w: r.width * k, h: r.height * k };
+    });
+    return R;
+  }
+
+  const wirePaths = (type, d) => type === 'runtime'
+    ? `<path class="wire runtime base" d="${d}"/><path class="wire runtime packets" d="${d}"/>`
+    : `<path class="wire ${type}" d="${d}"/>`;
+
+  function drawWires(list, R) {
+    let w = '', l = ''; const placed = [];
+    list.forEach(it => {
+      const ra = R[it.from], rb = R[it.to]; if (!ra || !rb) return;
+      const a = [ra.x + ra.w / 2, ra.y + ra.h / 2], b = [rb.x + rb.w / 2, rb.y + rb.h / 2], g = curve(a, b, .14);
+      const d = `M${a[0].toFixed(1)} ${a[1].toFixed(1)}Q${g.c[0].toFixed(1)} ${g.c[1].toFixed(1)} ${b[0].toFixed(1)} ${b[1].toFixed(1)}`;
+      const on = it.types.some(layerOn), type = it.types.find(layerOn) || it.types[0], color = D.wireTypes[type].color;
+      let t = .96; while (t > .5 && inRect(at(g, t), rb, 6)) t -= .02;          // arrow sits just outside the target card
+      const p = at(g, t), v = tan(g, t), ang = Math.atan2(v[1], v[0]) * 57.2958;
+      const ends = it.from + ' ' + it.to, cls = on ? '' : ' dim';
+      w += `<g class="wg${cls}" data-ends="${ends}">${wirePaths(type, d)}<path class="arr" style="fill:${color}" d="M-9 -6L5 0L-9 6z" transform="translate(${p[0].toFixed(1)} ${p[1].toFixed(1)}) rotate(${ang.toFixed(1)})"/><path class="hit" data-key="${esc(it.key)}" d="${d}"/></g>`;
+      // label: try several spots along the wire and take the first one that covers no card
+      const lw = it.label.length * 7.6 + 18; let box = null;
+      for (const tt of [.5, .42, .58, .34, .66, .26, .74]) {
+        const q = at(g, tt), bx = { x: q[0] - lw / 2, y: q[1] - 11, w: lw, h: 22 };
+        if (!Object.values(R).some(r => touch(bx, r, 4)) && !placed.some(o => touch(bx, o, 4))) { box = bx; break; }
+      }
+      if (!box) { const q = at(g, .5); box = { x: q[0] - lw / 2, y: q[1] - 11, w: lw, h: 22 }; }
+      placed.push(box);
+      l += `<g class="lg${cls}" data-ends="${ends}"><rect x="${box.x.toFixed(1)}" y="${box.y.toFixed(1)}" width="${lw.toFixed(1)}" height="22" rx="11" style="stroke:${color}"/><text x="${(box.x + lw / 2).toFixed(1)}" y="${(box.y + 15).toFixed(1)}" text-anchor="middle">${esc(it.label)}</text></g>`;
+    });
+    return { w, l };
+  }
+
+  // level 0: merge all wires between two chapters into one link
+  function chapterLinks() {
+    const m = new Map();
+    D.wires.forEach(w => {
+      const a = nodeById[w.from].ch, b = nodeById[w.to].ch; if (a === b) return;
+      const k = a + '>' + b; if (!m.has(k)) m.set(k, { key: k, from: a, to: b, wires: [], types: [] });
+      const e = m.get(k); e.wires.push(w); if (!e.types.includes(w.type)) e.types.push(w.type);
+    });
+    return [...m.values()].map(e => ({ ...e, types: PRIORITY.filter(t => e.types.includes(t)), label: e.wires.length + (e.wires.length > 1 ? ' links' : ' link') }));
+  }
+
+  /* ---------- stage rendering ---------- */
+  let items = [];
+  function renderStage(anim) {
+    const L1 = S.level === 1, ch = chapById[S.chapter];
+    const key = '<div class="key">' + Object.entries(D.wireTypes).map(([t, w]) =>
+      `<span class="ky"><svg viewBox="0 0 40 10" width="40" height="10"><path class="wire ${t}" d="M2 5H38"/></svg>${w.name}</span>`).join('') + '</div>';
+    let head = '', nodesHTML, below;
+    if (L1) {
+      const ns = D.nodes.filter(n => n.ch === ch.id), set = new Set(ns.map(n => n.id));
+      head = `<div class="stage-head"><button class="btn" data-go="">← Atlas</button><span class="numeral">${ch.num}</span>
+        <div class="grow"><h2>${esc(ch.title)}</h2><p>${esc(ch.blurb)}</p></div><span class="badge ${ch.status}">${ch.status === 'done' ? 'Done' : 'Next'}</span></div>`;
+      nodesHTML = ns.map(n => {
+        const [k, c] = KIND[n.kind] || ['PART', '--runtime'], p = P(n.x, n.y);
+        return `<button class="node ${n.status === 'next' ? 'next' : ''} ${S.node === n.id ? 'sel' : ''}" data-id="${n.id}" style="left:${p[0] / 10}%;top:${p[1] / 6}%;--kc:var(${c})"><span class="k">${k}</span><b>${esc(n.label)}</b><small>${esc(n.sub)}</small></button>`;
+      }).join('');
+      items = D.wires.filter(w => set.has(w.from) && set.has(w.to)).map(w => ({ key: w.id, from: w.from, to: w.to, types: [w.type], label: w.label, wires: [w] }));
+      const seen = new Set();
+      const chips = D.wires.filter(w => set.has(w.from) !== set.has(w.to)).map(w => {
+        const out = set.has(w.from), mine = nodeById[out ? w.from : w.to], other = nodeById[out ? w.to : w.from], oc = chapById[other.ch];
+        const txt = out ? `${mine.label} → ${other.label}` : `${other.label} → ${mine.label}`;
+        if (seen.has(txt)) return ''; seen.add(txt);
+        return `<button class="chip" data-go="${oc.id}"><i style="background:${D.wireTypes[w.type].color}"></i>${esc(txt)} <em>${esc(oc.title)}</em></button>`;
+      }).join('');
+      below = `<div class="xl"><h4>Connections to other chapters</h4>${chips || '<span class="muted">None.</span>'}</div>${key}<p class="hint">Click any part for details. Click a wire to see what travels on it. Press Esc to go back.</p>`;
+    } else {
+      nodesHTML = D.chapters.map(c => {
+        const p = P(c.x, c.y), count = D.nodes.filter(n => n.ch === c.id).length;
+        return `<button class="chap ${c.status === 'next' ? 'next' : ''}" data-go="${c.id}" data-id="${c.id}" style="left:${p[0] / 10}%;top:${p[1] / 6}%"><span class="num">${c.num}</span><span><b>${esc(c.title)}</b><small>${esc(c.sub)}</small><em>${esc(D.zones[c.zone])} · ${count} parts</em></span></button>`;
+      }).join('');
+      items = chapterLinks();
+      below = `${key}<p class="hint">Click a chapter to zoom in. Click a wire to see what travels on it. Hover a part to follow its connections.</p>`;
+    }
+    stage.innerHTML = head + `<div class="canvas"><svg class="wires" viewBox="0 0 1000 600"></svg>${nodesHTML}<svg class="labels" viewBox="0 0 1000 600"></svg></div>` + below;
+    const canvas = $('.canvas', stage), out = drawWires(items, measure(canvas));
+    $('.wires', canvas).innerHTML = out.w; $('.labels', canvas).innerHTML = out.l;
+    if (anim) canvas.classList.add(anim);
+  }
+
+  /* ---------- navigation and breadcrumb ---------- */
+  function crumb() {
+    const p = ['<a href="#" data-go="">Atlas</a>'];
+    if (S.chapter) { const c = chapById[S.chapter]; p.push(`<a href="#" data-go="${c.id}">${c.num} ${esc(c.title)}</a>`); }
+    if (S.node) p.push(`<span>${esc(nodeById[S.node].label)}</span>`);
+    $('#crumb').innerHTML = p.join(' <span class="sep">›</span> ');
+  }
+  function go(id) {
+    S.level = id ? 1 : 0; S.chapter = id; S.node = null;
+    ATLAS.closeDrawer(); renderStage(id ? 'zin' : 'zout'); crumb();
+    stage.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  /* ---------- drawer ---------- */
+  let render = null, curTab = 'plain';
+  function paintTab() {
+    $$('#drawerTabs .tab').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === curTab)));
+    $('#drawerBody').innerHTML = render(curTab);
+  }
+  function setDrawer(o) {
+    $('#drawerKicker').textContent = o.kicker; $('#drawerTitle').textContent = o.title;
+    $('#drawerTabs').hidden = !o.tabs; render = o.render; curTab = 'plain'; paintTab(); ATLAS.openDrawer();
+  }
+  const flows = (n, dir) => D.wires.filter(w => (dir === 'in' ? w.to : w.from) === n.id)
+    .map(w => ({ text: `${nodeById[dir === 'in' ? w.from : w.to].label} · ${w.label}`, type: w.type }));
+  const ioBlock = (h, arr) => `<h4 class="io-h">${h}</h4>` + (arr.length
+    ? `<ul class="list">${arr.map(i => typeof i === 'string' ? `<li>${esc(i)}</li>` : `<li><i class="dot" style="background:${D.wireTypes[i.type].color}"></i>${esc(i.text)}</li>`).join('')}</ul>`
+    : '<p class="muted">Nothing.</p>');
+  function nodeTab(n, t) {
+    const d = D.detail[n.id] || {}, empty = '<p class="muted">This tab is filled in during Part 2b and 2c.</p>';
+    if (t === 'plain')   return `<p class="lead">${esc(d.plain || n.tag)}</p><p class="muted">${esc(n.sub)}</p>`;
+    if (t === 'analogy') return d.analogy ? `<p class="lead">${esc(d.analogy)}</p>` : empty;
+    if (t === 'code')    return d.code ? `<pre class="code">${esc(d.code)}</pre>` : empty;
+    if (t === 'breaks')  return d.breaks ? `<ul class="list">${d.breaks.map(b => `<li>${esc(b)}</li>`).join('')}</ul>` : empty;
+    return ioBlock('Receives', d.in || flows(n, 'in')) + ioBlock('Sends', d.out || flows(n, 'out'));
+  }
+  function openNode(id) {
+    const n = nodeById[id], c = chapById[n.ch]; S.node = id;
+    $$('.node', stage).forEach(b => b.classList.toggle('sel', b.dataset.id === id)); crumb();
+    setDrawer({ kicker: `${c.num} ${c.title} · ${(KIND[n.kind] || ['PART'])[0]} · ${n.status === 'done' ? 'Done' : 'Next'}`, title: n.label, tabs: true, render: t => nodeTab(n, t) });
+  }
+  function openWire(it) {
+    const name = S.level ? nodeById : chapById, f = name[it.from], t = name[it.to];
+    const li = it.wires.map(w => { const a = nodeById[w.from], b = nodeById[w.to], ty = D.wireTypes[w.type];
+      return `<li><i class="dot" style="background:${ty.color}"></i><b>${esc(a.label)}</b> → <b>${esc(b.label)}</b><br><small class="muted">${ty.name} · ${esc(w.label)}${w.status === 'next' ? ' · Next' : ''}</small></li>`; }).join('');
+    setDrawer({ kicker: 'Connection', title: `${f.label || f.title} → ${t.label || t.title}`, tabs: false, render: () => `<ul class="list wl">${li}</ul>` });
+  }
+  $('#drawerTabs').addEventListener('click', e => { const b = e.target.closest('[data-tab]'); if (b) { curTab = b.dataset.tab; paintTab(); } });
+  const clearSel = () => { S.node = null; $$('.node.sel', stage).forEach(b => b.classList.remove('sel')); crumb(); };
+  $('#drawerClose').addEventListener('click', clearSel);
+
+  /* ---------- events ---------- */
+  document.addEventListener('click', e => {
+    const g = e.target.closest('[data-go]'); if (g) { e.preventDefault(); return go(g.dataset.go || null); }
+    const h = e.target.closest('.hit'); if (h) return openWire(items.find(i => i.key === h.dataset.key));
+    const n = e.target.closest('.node'); if (n) openNode(n.dataset.id);
+  });
+  function focus(id) {   // hover: highlight the wires of one card, fade the others
+    $$('.wg,.lg', stage).forEach(g => { const m = !!id && g.dataset.ends.split(' ').includes(id);
+      g.classList.toggle('fade', !!id && !m); });
+  }
+  stage.addEventListener('pointerover', e => { const n = e.target.closest('[data-id]'); focus(n ? n.dataset.id : null); });
+  stage.addEventListener('pointerleave', () => focus(null));
+  addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    if ($('#drawer').classList.contains('open')) { ATLAS.closeDrawer(); clearSel(); } else if (S.level) go(null);
+  });
+  let rt; const rerender = () => { clearTimeout(rt); rt = setTimeout(() => renderStage(), 120); };
+  addEventListener('resize', rerender); addEventListener('load', () => renderStage());
+  ['#btnSmaller', '#btnLarger'].forEach(s => $(s).addEventListener('click', rerender));
+  ATLAS.hooks.onLayer = () => renderStage();
+  ATLAS.go = go; ATLAS.openNode = openNode;   // Part 4 (Story mode) will use these
+
+  renderStage(); crumb();
+})();
+// ===== PART 4 : STORY + PRESENTER + JOURNEY =====
+(() => {
+  const { $, $$ } = ATLAS, S = ATLAS.state;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const pad = n => String(n).padStart(2, '0');
+
+  /* ---------- styles (injected here so Part 4 is one paste) ---------- */
+  const css = `
+  body.story{padding-bottom:13rem}
+  .sp-dim{opacity:.3} .sp-on{box-shadow:0 0 0 2px var(--runtime),0 0 40px color-mix(in srgb,var(--runtime) 45%,transparent)!important}
+  .wg.sp-wdim,.lg.sp-wdim{opacity:.07!important}
+  .chip[aria-pressed="true"]{border-color:var(--runtime);background:color-mix(in srgb,var(--runtime) 18%,transparent)}
+  #story{position:fixed;left:50%;bottom:1rem;transform:translateX(-50%);z-index:50;width:min(70rem,calc(100% - 2rem));
+    display:grid;grid-template-columns:auto 1fr auto;gap:.8rem 1.5rem;align-items:center;padding:1.1rem 1.5rem}
+  .sc-n{font:400 3.4rem/1 var(--f-display);color:var(--runtime-ink)}
+  .sc-n span{font:600 .9rem var(--f-mono);color:var(--ink-faint);margin-left:.3rem}
+  .sc-m h3{font:400 1.8rem/1.15 var(--f-display);margin:.4rem 0 .3rem} .sc-m p{font-size:1.1rem;color:var(--ink-soft)}
+  .sc-note{display:none;margin-top:.5rem;padding-top:.5rem;border-top:1px dashed var(--glass-edge);font-size:.98rem!important}
+  #story.notes .sc-note{display:block}
+  .sc-note b{font:700 .78rem var(--f-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);margin-right:.6rem}
+  .sc-c{display:flex;flex-wrap:wrap;gap:.4rem;justify-content:flex-end}
+  .sc-d{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:.35rem}
+  .sc-d button{width:.7rem;height:.7rem;padding:0;border-radius:99px;border:0;background:var(--glass-edge);cursor:pointer;transition:.2s}
+  .sc-d button.on{width:1.8rem;background:var(--runtime)} .sc-d small{margin-left:auto;color:var(--ink-faint);font-size:.85rem}
+  #journey{position:fixed;left:50%;top:5.6rem;transform:translateX(-50%);z-index:45;width:min(68rem,calc(100% - 2rem));
+    max-height:calc(100vh - 7rem);overflow:auto;padding:1.3rem 1.6rem}
+  body.story #journey{max-height:calc(100vh - 19rem)}
+  .jh{display:flex;flex-wrap:wrap;align-items:center;gap:.6rem 1rem} .jh h3{font:400 1.8rem/1.1 var(--f-display);flex:1}
+  .jx{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:1rem;align-items:center}
+  .jt{--p:0;position:relative;display:grid;grid-template-columns:repeat(8,1fr);gap:.3rem;margin:1.3rem 0 1.1rem}
+  .jt::before{content:"";position:absolute;left:6.25%;right:6.25%;top:1.15rem;height:3px;border-radius:3px;background:var(--glass-edge)}
+  .jt::after{content:"";position:absolute;left:6.25%;top:1.15rem;height:3px;border-radius:3px;width:calc(87.5% * var(--p));background:var(--runtime);transition:width .7s}
+  .pk{position:absolute;top:.72rem;left:calc(6.25% + 87.5% * var(--p));width:.95rem;height:.95rem;margin-left:-.47rem;border-radius:50%;
+    background:var(--runtime);box-shadow:0 0 18px var(--runtime);transition:left .7s;z-index:2}
+  .js{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:.4rem;background:none;border:0;color:var(--ink-soft);
+    font:600 .88rem/1.2 var(--f-body);cursor:pointer;text-align:center}
+  .jc{width:2.3rem;height:2.3rem;border-radius:50%;display:grid;place-items:center;background:var(--glass-solid);border:2px solid var(--glass-edge);font:700 .9rem var(--f-mono);color:var(--ink)}
+  .js.past .jc{border-color:var(--runtime)} .js.on .jc{background:var(--runtime);border-color:var(--runtime);color:#fff} .js.on{color:var(--ink)}
+  .jd{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:1.5rem}
+  .jd h4{font:400 1.6rem/1.1 var(--f-display)} .jw{font:600 .85rem var(--f-mono);color:var(--runtime-ink);margin:.4rem 0 .7rem}
+  .fa{font:1.35rem/1.8 "Vazirmatn","Noto Naskh Arabic","DejaVu Sans",Tahoma,sans-serif;direction:rtl;text-align:right}
+  .jb h5{font:600 .85rem var(--f-mono);letter-spacing:.06em;margin:.8rem 0 .2rem;color:var(--ink-faint)} .jb h5 b{color:var(--ink)}
+  .br{display:grid;grid-template-columns:9rem 1fr 3.6rem;gap:.6rem;align-items:center;margin:.35rem 0;font:.9rem var(--f-mono)}
+  .br i{height:.8rem;border-radius:99px;background:linear-gradient(90deg,var(--runtime) var(--w),rgba(22,41,58,.09) var(--w))}
+  .br em{font-style:normal;text-align:right;color:var(--ink-soft)}
+  @media(max-width:800px){#story{grid-template-columns:1fr}.jd{grid-template-columns:1fr}.js b{display:none}}`;
+  document.head.appendChild(Object.assign(document.createElement('style'), { textContent: css }));
+
+  /* ---------- scenes: sc(chapter, spotlight ids, title, key sentence, speaker note, flags) ---------- */
+  const sc = (go, spot, t, l, n, o = {}) => ({ go, spot, t, l, n, ...o });
+  const SC = [
+    sc(null, [], 'The question', 'How does a model that lives in a notebook become something anyone can use?', 'Open with the goal: a stranger types a review and gets two predictions. Everything else is plumbing for that.'),
+    sc('artifacts', ['training_repo', 'vectorizer', 'lr_rec', 'lr_band'], 'Training hands over files', 'A trained model is just files on disk: a vectorizer and two classifiers.', 'The two heads share one vectorizer. Only the B models are served.'),
+    sc('env', ['uvlock', 'reqs', 'venv'], 'Same versions in, same answers out', 'Saved files only load safely with the library versions that wrote them.', 'Likely question: why pin versions? A file saved with scikit-learn 1.9.1 may fail or silently differ under another version.'),
+    sc('contract', ['base_model', 'sklearn_loader'], 'One contract for every model', 'Every model promises the same two things: load() and predict().', 'This is why encoders can be added later without touching the API.'),
+    sc('contract', ['models_yaml', 'registry'], 'A registry book, not if-statements', 'models.yaml lists the models; the registry reads it and loads each one once.', 'Adding a model means one YAML block and one file, no code change.'),
+    sc('api', ['normalize_py', 'endpoints'], 'Clean the text like training did', 'The normalizer is a copy of the training one, so inputs look familiar to the model.', 'Same version 2.1 and join_suffixes false as in training. A mismatch would hurt accuracy silently.'),
+    sc('api', ['main_py', 'schemas', 'endpoints'], 'Load once, answer many times', 'The API loads models at startup, then every request reuses them from memory.', 'Loading takes seconds, predicting takes milliseconds (4.35 ms in our test).'),
+    sc('api', ['endpoints', 'errors'], 'Refusing clearly', 'Bad input gets 422, an unknown model 400, models not ready 503: never a crash.', 'The web page turns each code into a friendly picture.'),
+    sc('api', [], 'One review, end to end', 'Follow a single review through every station and see what each one receives.', 'Press the right arrow to walk the packet. The first sample is real output from our service.', { journey: true }),
+    sc('ui', ['app_py', 'picker', 'results'], 'The page never touches a model', 'Streamlit asks the API for the model list and sends reviews; it only draws results.', 'Because the page knows nothing about models, a new encoder shows up in the dropdown by itself.'),
+    sc('docker', ['dockerfile', 'image_api', 'image_ui'], 'An image is a frozen recipe', 'A Dockerfile builds an image: Python, packages and our code, frozen together.', 'Model files are not inside the image. Code changes rebuild fast because the package layer is cached.'),
+    sc('docker', ['compose', 'volume', 'cont_api', 'cont_ui'], 'Two containers, one network, one folder', 'Compose starts both containers, links them by name and mounts the model folder read-only.', 'The page reaches the API at http://api:8000, a name that compose provides.'),
+    sc('docker', ['cont_ui', 'cont_api'], 'Run it and check', 'GET /ready reports which models loaded and which failed, so problems are visible.', 'Demo: docker compose up, then the browser on port 8501.'),
+    sc('encoders', ['encoder_loader', 'gpu', 'idle'], 'Next: three encoders', 'Drop in each checkpoint and its tokenizer, run on the GPU, free it after 10 idle minutes.', 'Not built yet. Tokenizers are read from local folders only.', { next: true }),
+    sc(null, [], 'Four ideas to keep', 'Pin versions. Share one contract. Keep config outside code. Ship it in a container.', 'Return to the atlas: the model never changed, everything around it did.')
+  ];
+
+  /* ---------- story mode ---------- */
+  const card = Object.assign(document.createElement('section'), { id: 'story', className: 'glass', hidden: true });
+  const jp = Object.assign(document.createElement('section'), { id: 'journey', className: 'glass', hidden: true });
+  document.body.append(card, jp);
+  const btnS = $('#btnStory');
+  const btnJ = Object.assign(document.createElement('button'), { className: 'btn', id: 'btnJourney', textContent: 'Journey' });
+  btnS.after(btnJ);
+  let active = false, idx = 0;
+
+  function spot(ids) {   // light up the chosen parts, dim everything else
+    const set = new Set(ids);
+    $$('#stage [data-id]').forEach(el => {
+      el.classList.toggle('sp-on', set.has(el.dataset.id));
+      el.classList.toggle('sp-dim', set.size > 0 && !set.has(el.dataset.id));
+    });
+    $$('#stage .wg, #stage .lg').forEach(g => {
+      const e = g.dataset.ends.split(' ');
+      const keep = set.size === 0 || (set.size === 1 ? e.some(x => set.has(x)) : e.every(x => set.has(x)));
+      g.classList.toggle('sp-wdim', !keep);
+    });
+  }
+  function paintCard() {
+    const s = SC[idx];
+    card.innerHTML = `<div class="sc-n">${pad(idx + 1)}<span>/ ${pad(SC.length)}</span></div>
+      <div class="sc-m"><span class="badge ${s.next ? 'next' : 'done'}">${s.next ? 'Next' : 'Done'}</span><h3>${esc(s.t)}</h3><p>${esc(s.l)}</p><p class="sc-note"><b>Note</b>${esc(s.n)}</p></div>
+      <div class="sc-c"><button class="btn" data-sa="prev">←</button><button class="btn primary" data-sa="next">→</button><button class="btn" data-sa="notes">Notes</button><button class="btn" data-sa="exit">Exit</button></div>
+      <div class="sc-d">${SC.map((_, i) => `<button data-si="${i}" class="${i === idx ? 'on' : ''}" aria-label="Scene ${i + 1}"></button>`).join('')}<small>← → move · N notes · F fullscreen · Esc exit</small></div>`;
+  }
+  function show(i) {
+    idx = Math.max(0, Math.min(SC.length - 1, i)); const s = SC[idx];
+    if (s.go !== (S.chapter || null)) ATLAS.go(s.go);   // same chapter: no re-zoom, only the spotlight changes
+    spot(s.spot); paintCard();
+    s.journey ? openJourney() : closeJourney();
+  }
+  function start() { active = true; document.body.classList.add('story'); card.hidden = false; btnS.textContent = '■ Exit'; show(0); }
+  function exit() { active = false; document.body.classList.remove('story'); card.hidden = true; btnS.textContent = '▶ Story'; closeJourney(); spot([]); }
+  card.addEventListener('click', e => {
+    const a = e.target.closest('[data-sa]'), d = e.target.closest('[data-si]');
+    if (d) return show(+d.dataset.si);
+    if (a) ({ prev: () => show(idx - 1), next: () => show(idx + 1), notes: () => card.classList.toggle('notes'), exit })[a.dataset.sa]();
+  });
+  // when the atlas is redrawn (resize, layer change), apply the spotlight again
+  new MutationObserver(() => { if (active) spot(SC[idx].spot); }).observe($('#stage'), { childList: true });
+
+  /* ---------- request journey ---------- */
+  const top = o => Object.keys(o).reduce((a, b) => o[a] >= o[b] ? a : b);
+  const rd = o => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, +v.toFixed(4)]));
+  const code = t => `<pre class="code">${esc(t)}</pre>`;
+  const json = o => JSON.stringify(o, null, 2);
+  const bars = (title, o) => `<div class="jb"><h5>${title}: <b>${top(o)}</b></h5>` +
+    Object.entries(o).map(([k, v]) => `<div class="br"><span>${k}</span><i style="--w:${(v * 100).toFixed(1)}%"></i><em>${v.toFixed(3)}</em></div>`).join('') + '</div>';
+
+  const SAMPLES = [
+    { id: 'mixed', label: 'Mixed opinion', real: true, fa: 'کیفیت محصول خیلی خوب بود اما بسته‌بندی ضعیف بود',
+      rec: { recommended: .4479, not_recommended: .0533, no_idea: .4988 }, band: { low: .3302, medium: .3850, high: .2848 }, ms: 4.35 },
+    { id: 'pos', label: 'Clearly positive', fa: 'عالی بود، دقیقا مطابق توضیحات. پیشنهاد می‌کنم بخرید',
+      rec: { recommended: .93, not_recommended: .02, no_idea: .05 }, band: { low: .02, medium: .10, high: .88 }, ms: 4.2 },
+    { id: 'neg', label: 'Clearly negative', fa: 'بعد از دو روز خراب شد، اصلا نخرید',
+      rec: { recommended: .03, not_recommended: .90, no_idea: .07 }, band: { low: .80, medium: .15, high: .05 }, ms: 4.1 }
+  ];
+  const stations = s => [
+    { n: 'Browser', w: 'ui/app.py', say: 'You type a review and pick a model. No model has been touched yet.',
+      v: `<div class="fa">${esc(s.fa)}</div><p class="muted">Model picker: TF-IDF + Logistic Regression</p>` },
+    { n: 'HTTP request', w: 'requests.post → http://api:8000/predict', say: 'Streamlit sends the text and a model id as JSON. Nothing else: no labels, no ratings.',
+      v: code(json({ text: s.fa, model_id: 'tfidf_baseline' })) },
+    { n: 'Validation', w: 'app/schemas/prediction.py', say: 'Pydantic checks the shape. Empty or overlong text is refused here with 422.',
+      v: '<ul class="list"><li>text: 1 to 5000 characters ✓</li><li>model_id: present ✓</li></ul>' },
+    { n: 'Normalize', w: 'app/core/normalize.py · v2.1', say: 'Same cleaning rules as training. Blank or URL-only text stops here with 422.',
+      v: `<div class="fa">${esc(s.fa)}</div><p class="muted">Already clean, so unchanged. Arabic ي and ك, extra spaces and zero-width marks would be fixed here.</p>` },
+    { n: 'Registry', w: 'app/core/registry.py', say: 'The registry looks the id up. Unknown id gives 400, a model that failed to load gives 503.',
+      v: code('registry.get("tfidf_baseline")\n→ SklearnTfidfModel (loaded at startup)') },
+    { n: 'Vectorize', w: 'vectorizer_tfidf12.joblib', say: 'The text becomes one long row of numbers. Both heads share this step.',
+      v: code('1 review → 1 × 500,000 sparse vector\n(mostly zeros)') },
+    { n: 'Two heads', w: 'tfidf12_rec_B · tfidf12_band_B', say: 'Two logistic-regression models read the same vector. Each returns a probability for every class.',
+      v: bars('recommendation', s.rec) + bars('rating band', s.band) },
+    { n: 'Response', w: 'PredictResponse → Streamlit', say: 'The API answers with JSON. The page draws the bars and shows the latency.',
+      v: code(json({ model_id: 'tfidf_baseline', model_name: 'TF-IDF + Logistic Regression', normalizer_version: '2.1',
+        recommendation: { label: top(s.rec), probabilities: rd(s.rec) }, rating_band: { label: top(s.band), probabilities: rd(s.band) }, latency_ms: s.ms })) }
+  ];
+
+  let jOpen = false, jS = SAMPLES[0], jStep = 0, jTimer = null;
+  function paintStep() {
+    const st = stations(jS), x = st[jStep];
+    $('.jt', jp).style.setProperty('--p', jStep / (st.length - 1));
+    $$('.js', jp).forEach((b, i) => { b.classList.toggle('on', i === jStep); b.classList.toggle('past', i < jStep); });
+    $('#jd', jp).innerHTML = `<div><h4>${jStep + 1}. ${esc(x.n)}</h4><p class="jw">${esc(x.w)}</p><p class="lead">${esc(x.say)}</p></div><div>${x.v}</div>`;
+  }
+  function renderJourney() {
+    const st = stations(jS);
+    jp.innerHTML = `<div class="jh"><h3>Journey of one review</h3><span class="badge ${jS.real ? 'done' : 'next'}">${jS.real ? 'Real output from our service' : 'Illustrative numbers'}</span><button class="btn" data-j="close">Close</button></div>
+      <div class="jx">${SAMPLES.map(x => `<button class="chip" data-sample="${x.id}" aria-pressed="${x === jS}">${esc(x.label)}</button>`).join('')}
+        <button class="btn" data-j="play" id="jPlay">▶ Play</button><button class="btn" data-j="back">◀</button><button class="btn" data-j="fwd">▶</button></div>
+      <div class="jt">${st.map((x, i) => `<button class="js" data-st="${i}"><span class="jc">${i + 1}</span><b>${esc(x.n)}</b></button>`).join('')}<i class="pk"></i></div>
+      <div class="jd" id="jd"></div>`;
+    paintStep();
+  }
+  const setStep = i => { jStep = Math.max(0, Math.min(7, i)); paintStep(); };
+  const pause = () => { clearInterval(jTimer); jTimer = null; const b = $('#jPlay', jp); if (b) b.textContent = '▶ Play'; };
+  const play = () => {
+    if (jTimer) return pause();
+    if (jStep >= 7) setStep(0);
+    $('#jPlay', jp).textContent = '❚❚ Pause';
+    jTimer = setInterval(() => { if (jStep >= 7) return pause(); setStep(jStep + 1); }, 1900);
+  };
+  function openJourney() { if (jOpen) return; jOpen = true; jp.hidden = false; btnJ.setAttribute('aria-pressed', 'true'); jStep = 0; renderJourney(); }
+  function closeJourney() { if (!jOpen) return; pause(); jOpen = false; jp.hidden = true; btnJ.setAttribute('aria-pressed', 'false'); }
+  jp.addEventListener('click', e => {
+    const s = e.target.closest('[data-sample]'), st = e.target.closest('[data-st]'), j = e.target.closest('[data-j]');
+    if (s) { pause(); jS = SAMPLES.find(x => x.id === s.dataset.sample); jStep = 0; renderJourney(); }
+    else if (st) { pause(); setStep(+st.dataset.st); }
+    else if (j) ({ close: closeJourney, play, back: () => setStep(jStep - 1), fwd: () => setStep(jStep + 1) })[j.dataset.j]();
+  });
+  btnJ.addEventListener('click', () => jOpen ? closeJourney() : openJourney());
+
+  /* ---------- keyboard (capture phase, so it runs before the Part 3 handler) ---------- */
+  ATLAS.hooks.onStory = () => active ? exit() : start();
+  addEventListener('keydown', e => {
+    if (e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+    const k = e.key;
+    if (k === 'Escape') {   // an open drawer or plain atlas: let Part 3 handle it
+      if ($('#drawer').classList.contains('open') || !(jOpen || active)) return;
+      e.preventDefault(); e.stopImmediatePropagation(); jOpen ? closeJourney() : exit(); return;
+    }
+    if (k === 'f' || k === 'F') { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.(); return; }
+    const fwd = k === 'ArrowRight' || k === 'PageDown' || (k === ' ' && e.target.tagName !== 'BUTTON');
+    const back = k === 'ArrowLeft' || k === 'PageUp', notes = k === 'n' || k === 'N';
+    if (!fwd && !back && !notes) return;
+    if (active) {
+      e.preventDefault();
+      if (notes) card.classList.toggle('notes');
+      else if (jOpen && SC[idx].journey && (fwd ? jStep < 7 : jStep > 0)) { pause(); setStep(jStep + (fwd ? 1 : -1)); }
+      else show(idx + (fwd ? 1 : -1));
+    } else if (jOpen && (fwd || back)) { e.preventDefault(); pause(); setStep(jStep + (fwd ? 1 : -1)); }
+  }, true);
+})();
+// ===== PART 5 : LAB + GLOSSARY =====
+(() => {
+  const { $, $$ } = ATLAS;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  /* ---------- styles (injected here so Part 5 is one paste) ---------- */
+  const css = `
+  #lab{position:fixed;left:50%;top:5.6rem;transform:translateX(-50%);z-index:46;width:min(68rem,calc(100% - 2rem));
+    max-height:calc(100vh - 7rem);overflow:auto;padding:1.3rem 1.6rem}
+  body.story #lab{max-height:calc(100vh - 19rem)}
+  .lb{margin-top:1.2rem} .lab-g{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1.5rem}
+  .big{font:400 5.5rem/1 var(--f-display);color:var(--err)}
+  .dog{display:block;width:100%;max-width:20rem;border-radius:18px;margin-top:1rem}
+  .dogfb{display:grid;place-items:center;text-align:center;width:100%;max-width:20rem;aspect-ratio:4/3;margin-top:1rem;padding:1rem;
+    border-radius:18px;border:1px dashed var(--glass-edge);color:var(--ink-faint);font:.9rem var(--f-mono)}
+  .fld{display:grid;gap:.6rem} .fld label{display:grid;gap:.2rem;font:600 .8rem var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
+  .fld input{font:500 1rem var(--f-mono);padding:.5rem .7rem;border-radius:10px;border:1px solid var(--glass-edge);background:var(--glass-solid);color:var(--ink)}
+  .steps{list-style:none;padding:0;display:grid;gap:.7rem} .steps li{display:flex;align-items:center;gap:.8rem;flex-wrap:wrap}
+  .steps li span{flex:1;min-width:12rem} .steps li.ok span{color:var(--ink-faint);text-decoration:line-through}
+  .dd{border:1px solid var(--glass-edge);border-radius:14px;background:var(--glass-solid);overflow:hidden}
+  .dd div{padding:.6rem .9rem;border-top:1px solid var(--glass-edge)} .dd div:first-child{border-top:0;font:600 .8rem var(--f-mono);color:var(--ink-faint)}
+  .dd .new{background:color-mix(in srgb,var(--runtime) 16%,transparent)}
+  .ly{display:grid;grid-template-columns:minmax(0,1fr) 7rem 5rem;gap:.8rem;align-items:center;padding:.6rem .9rem;margin:.4rem 0;border-radius:12px;
+    border:1px solid var(--glass-edge);background:var(--glass-solid);font:.9rem var(--f-mono)}
+  .ly.re{border-color:var(--files);background:color-mix(in srgb,var(--files) 14%,var(--glass-solid))} .ly.ca{color:var(--ink-soft)} .ly em{font-style:normal;text-align:right}
+  .mt .br{grid-template-columns:5rem 1fr 8rem} .row{display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;margin:.7rem 0}
+  @media(max-width:800px){.lab-g{grid-template-columns:1fr}}
+  #drawerBody .term::after{left:0;transform:translateY(4px)} #drawerBody .term:hover::after,#drawerBody .term:focus-visible::after{transform:none}`;
+  document.head.appendChild(Object.assign(document.createElement('style'), { textContent: css }));
+
+  /* ---------- data ---------- */
+  const ERR = [
+    { code: 422, name: 'Blank text', where: 'prediction.py (empty) · main.py _normalize() (spaces or URL only)',
+      when: 'Empty text fails the schema. Spaces-only or URL-only text is refused after normalizing.',
+      req: '{"text": "   ", "model_id": "tfidf_baseline"}', res: '{"detail": "Text is not valid (empty or URL only)."}',
+      ui: 'The page checks blank text itself first, so the API is the second line of defence.' },
+    { code: 400, name: 'Unknown model', where: 'main.py · predict()', when: 'The model_id is not in the registry.',
+      req: '{"text": "...", "model_id": "abc"}', res: '{"detail": "Unknown model: abc"}',
+      ui: 'The dropdown is built from /models, so only a hand-made request can trigger this.' },
+    { code: 503, name: 'Models not ready', where: 'main.py · ready()', when: 'No model finished loading, for example because artifact files are missing.',
+      req: 'GET /ready', res: '{"detail": {"errors": {"tfidf_baseline": "FileNotFoundError: ..."}}}',
+      ui: 'A health check can poll this route and wait until it turns 200.' },
+    { code: 500, name: 'Unexpected error', where: 'anywhere', when: 'A bug or a crash that nobody planned for.',
+      req: 'any request', res: 'Internal Server Error', ui: 'Details stay in the API logs. The review text itself is never logged.' }
+  ];
+  const LAY = {
+    good: [['FROM python:3.12-slim', 0, null], ['WORKDIR /app', .1, null], ['COPY requirements.txt .', .1, 'req'],
+           ['RUN pip install (from wheels)', 40, null], ['COPY app ./app', .1, 'code'], ['COPY models.yaml .', .1, 'yml']],
+    bad:  [['FROM python:3.12-slim', 0, null], ['WORKDIR /app', .1, null], ['COPY app ./app', .1, 'code'],
+           ['COPY requirements.txt .', .1, 'req'], ['RUN pip install (from wheels)', 40, null], ['COPY models.yaml .', .1, 'yml']]
+  };
+  const ENC = [{ n: 'Encoder A', gb: .5 }, { n: 'Encoder B', gb: .7 }, { n: 'Encoder C', gb: 1.1 }];   // illustrative sizes
+
+  /* ---------- state ---------- */
+  let open = false, tab = 'err', E = ERR[0], DS = 0, ord = 'good', edit = null, mm = ENC.map(() => ({ on: false, idle: 0 })), msg = 'No encoder is loaded yet.';
+  const F = { id: 'roberta_b', name: 'RoBERTa (fine-tuned B)', run: 'transformer_runs/roberta_B', ckpt: 'roberta_B_best_model.pt' };
+  const yaml = () => `  ${F.id}:\n    display_name: "${F.name}"\n    type: transformer_encoder\n    enabled: true\n    unloadable: true\n    checkpoint: ${F.run}/${F.ckpt}\n    tokenizer: ${F.run}/tokenizer\n    heads:\n      recommendation:\n        labels: {0: recommended, 1: not_recommended, 2: no_idea}\n      rating_band:\n        labels: {0: low, 1: medium, 2: high}`;
+
+  /* ---------- views ---------- */
+  const VIEW = {
+    err: () => `<div class="lab-g"><div><p class="lead">Trigger a failure and see exactly what the API answers.</p>
+      ${ERR.map(e => `<button class="chip" data-err="${e.code}" aria-pressed="${e === E}"><b>${e.code}</b> ${esc(e.name)}</button>`).join('')}
+      <h4 class="io-h">Request</h4><pre class="code">${esc(E.req)}</pre><h4 class="io-h">Response <span class="muted">(wording illustrative)</span></h4><pre class="code">${esc(E.res)}</pre></div>
+      <div><div class="big">${E.code}</div><p class="lead">${esc(E.when)}</p><p class="muted"><b>Raised in:</b> ${esc(E.where)}</p><p class="muted">${esc(E.ui)}</p>
+      <img class="dog" alt="HTTP ${E.code}" src="https://httpstatusdogs.com/img/picture-perfect/${E.code}.jpg"></div></div>`,
+
+    drop: () => {
+      const st = ['Copy the run folder into artifacts/ (the folder with .pt and tokenizer/)', 'Add the block below to models.yaml', 'Restart the API: docker compose restart api'];
+      return `<div class="lab-g"><div><p class="lead">Adding an encoder means files and settings, never code. <span class="badge next">Planned format</span></p>
+        <div class="fld">${[['id', 'Model id'], ['name', 'Display name'], ['run', 'Run folder'], ['ckpt', 'Checkpoint file']].map(([k, l]) =>
+          `<label>${l}<input data-f="${k}" value="${esc(F[k])}"></label>`).join('')}</div>
+        <h4 class="io-h">Block under <code>models:</code></h4><pre class="code" id="yml">${esc(yaml())}</pre></div>
+        <div><ol class="steps">${st.map((s, i) => `<li class="${DS > i ? 'ok' : ''}"><span>${i + 1}. ${s}</span>
+          <button class="btn ${DS === i ? 'primary' : ''}" data-ds="${i}" ${DS === i ? '' : 'disabled'}>${DS > i ? '✓' : 'Do it'}</button></li>`).join('')}</ol>
+        <button class="btn" data-reset>Reset</button><h4 class="io-h">What the web page shows</h4>
+        <div class="dd"><div>Model</div><div>TF-IDF + Logistic Regression</div>${DS >= 3 ? `<div class="new" id="ddNew">${esc(F.name)}</div>` : ''}</div>
+        <p class="muted">${DS >= 3 ? 'It appeared by itself: the page reads the list from /models. The model loads on its first request.' : 'Finish the three steps to see the dropdown change.'}</p></div></div>`;
+    },
+
+    dock: () => {
+      const L = LAY[ord], first = edit ? L.findIndex(l => l[2] === edit) : L.length;
+      const total = L.reduce((s, l, i) => i >= first ? s + l[1] : s, 0);
+      const tabBtn = (k, t) => `<button class="chip" data-ord="${k}" aria-pressed="${ord === k}">${t}</button>`;
+      const edBtn = (k, t) => `<button class="chip" data-edit="${k}" aria-pressed="${edit === k}">${t}</button>`;
+      return `<p class="lead">Docker saves every Dockerfile step as a layer and reuses it until something above it changes.</p>
+        <div class="row"><b>Order:</b>${tabBtn('good', 'Packages first (ours)')}${tabBtn('bad', 'Code first')}</div>
+        <div class="row"><b>I changed:</b>${edBtn('code', 'app/main.py')}${edBtn('req', 'requirements.txt')}${edBtn('yml', 'models.yaml')}${edBtn('none', 'nothing')}</div>
+        ${L.map((l, i) => `<div class="ly ${i >= first ? 're' : 'ca'}"><span>${esc(l[0])}</span><span>${i >= first ? '↻ rebuilt' : '✓ cached'}</span><em>${i >= first ? '≈' + (l[1] >= 1 ? Math.round(l[1]) : l[1]) + ' s' : '0 s'}</em></div>`).join('')}
+        <p class="lead">Rebuild time: <b>${total >= 1 ? '≈' + Math.round(total) + ' s' : 'under 1 s'}</b></p>
+        <p class="muted">The pip step takes about 40 s in our real build. The other times are rough. Code changes constantly and packages rarely, so the slow step should sit above the code.</p>`;
+    },
+
+    mem: () => {
+      const used = ENC.reduce((s, e, i) => mm[i].on ? s + e.gb : s, 0);
+      return `<p class="lead">The GPU has 8 GB. Encoders load on demand and leave after 10 idle minutes. <span class="badge next">Sizes illustrative</span></p>
+        <div class="mt"><div class="br"><span>VRAM</span><i style="--w:${(used / 8 * 100).toFixed(1)}%"></i><em>${used.toFixed(1)} / 8 GB</em></div></div>
+        <p class="muted">The baseline always sits in ordinary RAM and runs on the CPU, so it is never unloaded.</p>
+        ${ENC.map((e, i) => `<div class="row"><b>${e.n}</b><span class="badge ${mm[i].on ? 'done' : 'next'}">${mm[i].on ? 'on GPU' : 'not loaded'}</span>
+          <span class="muted">≈${e.gb} GB${mm[i].on ? ' · idle ' + mm[i].idle + ' / 10 min' : ''}</span><button class="btn" data-enc="${i}">Send request</button></div>`).join('')}
+        <div class="row"><button class="btn primary" data-mm="ff">Fast-forward 5 min</button></div><p class="lead">${esc(msg)}</p>`;
+    }
+  };
+  const TABS = [['err', 'Error lab'], ['drop', 'Drop-in'], ['dock', 'Docker layers'], ['mem', 'Memory']];
+
+  /* ---------- panel ---------- */
+  const lab = Object.assign(document.createElement('section'), { id: 'lab', className: 'glass', hidden: true });
+  document.body.appendChild(lab);
+  const btnL = Object.assign(document.createElement('button'), { className: 'btn', id: 'btnLab', textContent: 'Lab' });
+  ($('#btnJourney') || $('#btnStory')).after(btnL);
+
+  function paint() {
+    lab.innerHTML = `<div class="jh"><h3>Lab</h3><div class="tabs" role="tablist">${TABS.map(([k, n]) => `<button class="tab" data-tab="${k}" aria-selected="${k === tab}">${n}</button>`).join('')}</div>
+      <button class="btn" data-x="close">Close</button></div><div class="lb">${VIEW[tab]()}</div>`;
+    const im = $('.dog', lab);
+    if (im) im.addEventListener('error', () => { const d = document.createElement('div'); d.className = 'dogfb'; d.textContent = 'The picture needs internet · HTTP ' + E.code; im.replaceWith(d); });
+    annotate(lab);
+  }
+  const openLab = () => { const j = $('#btnJourney'); if (j && j.getAttribute('aria-pressed') === 'true') j.click(); open = true; lab.hidden = false; btnL.setAttribute('aria-pressed', 'true'); paint(); };
+  const closeLab = () => { open = false; lab.hidden = true; btnL.setAttribute('aria-pressed', 'false'); };
+  btnL.addEventListener('click', () => open ? closeLab() : openLab());
+  $('#btnJourney')?.addEventListener('click', () => { if (open && $('#btnJourney').getAttribute('aria-pressed') === 'true') closeLab(); });
+  $('#story').addEventListener('click', () => { if (open) closeLab(); });
+
+  lab.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b || b.disabled) return; const d = b.dataset;
+    if (d.x) return closeLab();
+    if (d.tab) tab = d.tab;
+    else if (d.err) E = ERR.find(x => x.code === +d.err);
+    else if (d.ds !== undefined) DS = +d.ds + 1;
+    else if (d.reset !== undefined) DS = 0;
+    else if (d.ord) ord = d.ord;
+    else if (d.edit) edit = d.edit === 'none' ? null : d.edit;
+    else if (d.enc !== undefined) { const m = mm[+d.enc]; msg = m.on ? ENC[+d.enc].n + ' answers at once: it is already on the GPU.' : ENC[+d.enc].n + ' was not loaded: cold start, a few seconds to read the checkpoint and move it to the GPU.'; m.on = true; m.idle = 0; }
+    else if (d.mm === 'ff') {
+      const gone = []; mm.forEach((m, i) => { if (!m.on) return; m.idle += 5; if (m.idle >= 10) { m.on = false; m.idle = 0; gone.push(ENC[i].n); } });
+      msg = gone.length ? gone.join(', ') + ' idle for 10 minutes: freed from the GPU.' : mm.some(m => m.on) ? 'Five more minutes pass. Nothing is freed yet.' : 'Nothing is loaded.';
+    } else return;
+    paint();
+  });
+  lab.addEventListener('input', e => {   // typing updates only the YAML preview, so the input keeps focus
+    const k = e.target.dataset.f; if (!k) return; F[k] = e.target.value;
+    $('#yml', lab).textContent = yaml(); const n = $('#ddNew', lab); if (n) n.textContent = F.name;
+  });
+  addEventListener('keydown', e => {
+    if (e.key === 'Escape' && open && !$('#drawer').classList.contains('open')) { e.stopImmediatePropagation(); closeLab(); }
+  }, true);
+
+  /* ---------- glossary: first mention of each term becomes a hover tip ---------- */
+  const GL = {
+    daemon: 'A program that always runs in the background. Docker’s daemon builds and runs containers.',
+    wheel: 'A pre-built Python package file (.whl) that installs without compiling.',
+    endpoint: 'One URL of the API, such as /predict, that does one job.',
+    volume: 'Shares a folder from your computer with the container, without copying it.',
+    mount: 'Makes a folder from your computer visible inside the container.',
+    container: 'A running copy of an image, isolated from the rest of your computer.',
+    layer: 'One Dockerfile step, saved so Docker can reuse it next time.',
+    cache: 'Work saved from an earlier build, so unchanged steps are skipped.',
+    tokenizer: 'Splits text into pieces and turns each piece into a number a Transformer understands.',
+    vectorizer: 'Turns a text into a long row of numbers (TF-IDF scores) that a classifier can read.',
+    'tf-idf': 'A score that is high for words that are frequent in one review but rare overall.',
+    probability: 'How strongly the model believes in a class. All of them add up to 1.',
+    probabilities: 'How strongly the model believes in each class. They add up to 1.',
+    pydantic: 'A library that checks incoming data has the right shape.',
+    registry: 'A manager that knows which models exist and keeps them loaded in memory.',
+    lifespan: 'Code that runs once when the service starts and once when it stops.',
+    joblib: 'A Python tool for saving a trained model to a file and loading it back.',
+    vram: 'The memory on the graphics card, where the GPU keeps model weights.',
+    yaml: 'A readable text format for settings.',
+    'soft-code': 'Keeping settings in config files instead of code, so changes need no code edits.'
+  };
+  const RE = new RegExp('\\b(' + Object.keys(GL).sort((a, b) => b.length - a.length).join('|') + ')(?:s|es)?\\b', 'gi');
+  function wrap(tn, seen) {
+    const txt = tn.nodeValue; RE.lastIndex = 0; let m;
+    while ((m = RE.exec(txt))) {
+      const key = m[1].toLowerCase(); if (seen.has(key)) continue; seen.add(key);
+      const after = tn.splitText(m.index + m[0].length), mid = tn.splitText(m.index), sp = document.createElement('span');
+      sp.className = 'term'; sp.tabIndex = 0; sp.dataset.tip = GL[key]; mid.replaceWith(sp); sp.appendChild(mid);
+      return wrap(after, seen);
+    }
+  }
+  function annotate(root) {
+    const seen = new Set();
+    $$('p, li', root).forEach(el => {
+      if (el.closest('.term, pre, .jb')) return;
+      const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), nodes = [];
+      while (w.nextNode()) nodes.push(w.currentNode);
+      nodes.forEach(tn => { if (!tn.parentElement.closest('.term, pre, code')) wrap(tn, seen); });
+    });
+  }
+  [$('#drawerBody'), $('#story')].forEach(el => {   // disconnect while editing so our own changes do not trigger a loop
+    const o = { childList: true, subtree: true }, ob = new MutationObserver(() => { ob.disconnect(); annotate(el); ob.observe(el, o); });
+    ob.observe(el, o);
+  });
+})();
 </script>
 </body>
 </html>
