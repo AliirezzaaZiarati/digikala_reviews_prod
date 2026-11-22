@@ -8,13 +8,13 @@ services:
       # Trained artifacts live in the training project; mounted read-only.
       - ../digikala-review-transformer/artifacts:/models:ro
     # GPU: uncomment when the encoders arrive
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     restart: unless-stopped
 
   ui:
